@@ -5,6 +5,7 @@ from app import ui, seed, tts_engine
 def main(open_browser: bool = True) -> None:
     ui.config.ensure_dirs()
     os.environ.setdefault("MODELSCOPE_CACHE", str(ui.config.MODELS_DIR))
+    tts_engine.ensure_model(ui.config.MODEL_06B)   # 缺模型则先下载(带进度)，下完再起界面
     seed.seed_defaults()
     demo = ui.build_ui("zh-Hans")
     # 后台预热模型，避免首次生成时干等加载(~15-30s)
