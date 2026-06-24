@@ -38,6 +38,26 @@ def resolve_model_dir(model_id: str) -> str:
     return str(local) if local.exists() else model_id
 
 
+def ensure_model(model_id: str) -> str:
+    """确保模型权重在本地；缺失则从 ModelScope 下载(进度走控制台)。返回本地目录。
+    幂等：已存在直接返回、不下载。下载失败抛带中英提示的 RuntimeError。"""
+    local = resolve_model_dir(model_id)
+    if local != model_id:                      # 已在本地
+        return local
+    print("首次启动需下载模型（约 1.8GB，仅首次），请稍候…\n"
+          "First launch: downloading the model (~1.8 GB), please wait…", flush=True)
+    try:
+        from modelscope import snapshot_download
+        path = snapshot_download(model_id)     # 自带 tqdm 进度
+    except Exception as e:
+        raise RuntimeError(
+            "模型下载失败，请检查网络后重试。"
+            "Model download failed; check your network and retry. "
+            f"(detail: {e})") from e
+    print("模型已就绪。Model ready.", flush=True)
+    return path
+
+
 def has_17b_downloaded() -> bool:
     return resolve_model_dir(config.MODEL_17B) != config.MODEL_17B
 

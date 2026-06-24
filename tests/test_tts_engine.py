@@ -158,3 +158,47 @@ def test_cues_to_srt_format():
     assert "00:00:00,000 --> 00:00:01,500" in srt
     assert "00:00:02,000 --> 00:00:03,000" in srt
     assert "hi" in srt and "yo" in srt
+
+
+def test_ensure_model_skips_when_present(monkeypatch, tmp_path):
+    import sys, types
+    from app import tts_engine, config
+    monkeypatch.setattr(config, "MODELS_DIR", tmp_path)
+    (tmp_path / "Qwen" / "Qwen3-TTS-12Hz-0___6B-Base").mkdir(parents=True)
+    called = {"n": 0}
+    fake = types.ModuleType("modelscope")
+    fake.snapshot_download = lambda *a, **k: (called.__setitem__("n", called["n"] + 1), "X")[1]
+    monkeypatch.setitem(sys.modules, "modelscope", fake)
+    out = tts_engine.ensure_model("Qwen/Qwen3-TTS-12Hz-0.6B-Base")
+    assert called["n"] == 0
+    assert out.endswith("Qwen3-TTS-12Hz-0___6B-Base")
+
+
+def test_ensure_model_downloads_when_absent(monkeypatch, tmp_path):
+    import sys, types
+    from app import tts_engine, config
+    monkeypatch.setattr(config, "MODELS_DIR", tmp_path)
+    called = {"id": None}
+    fake = types.ModuleType("modelscope")
+    def _dl(model_id, *a, **k):
+        called["id"] = model_id
+        return str(tmp_path / "downloaded")
+    fake.snapshot_download = _dl
+    monkeypatch.setitem(sys.modules, "modelscope", fake)
+    out = tts_engine.ensure_model("Qwen/Qwen3-TTS-12Hz-0.6B-Base")
+    assert called["id"] == "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+    assert out.endswith("downloaded")
+
+
+def test_ensure_model_raises_clear_error_on_failure(monkeypatch, tmp_path):
+    import sys, types, pytest
+    from app import tts_engine, config
+    monkeypatch.setattr(config, "MODELS_DIR", tmp_path)
+    fake = types.ModuleType("modelscope")
+    def _boom(*a, **k):
+        raise OSError("network down")
+    fake.snapshot_download = _boom
+    monkeypatch.setitem(sys.modules, "modelscope", fake)
+    with pytest.raises(RuntimeError) as ei:
+        tts_engine.ensure_model("Qwen/Qwen3-TTS-12Hz-0.6B-Base")
+    assert "网络" in str(ei.value) or "network" in str(ei.value).lower()
