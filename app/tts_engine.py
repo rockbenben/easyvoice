@@ -51,7 +51,7 @@ def ensure_model(model_id: str) -> str:
         path = snapshot_download(model_id)     # 自带 tqdm 进度
     except Exception as e:
         raise RuntimeError(
-            "模型下载失败，请检查网络后重试。"
+            "模型下载失败，请检查网络后重试。 "
             "Model download failed; check your network and retry. "
             f"(detail: {e})") from e
     print("模型已就绪。Model ready.", flush=True)
