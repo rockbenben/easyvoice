@@ -32,7 +32,8 @@ param(
   [string]$EnvName   = "easyvoice",
   [string]$Version   = "v1.0",
   [string]$CondaRoot = "$env:USERPROFILE\miniconda3",
-  [string]$ModelId   = "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
+  [string]$ModelId   = "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+  [ValidateSet("gpu","cpu")][string]$Variant = "gpu"
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,7 +41,12 @@ $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false
 
 $ProjectRoot = $PSScriptRoot
-$DistName    = "EasyVoice-$Version"
+if ($Variant -eq "cpu") {
+  if ($EnvName -eq "easyvoice") { $EnvName = "easyvoice-cpu" }   # 未显式指定则用 CPU 环境
+  $DistName    = "EasyVoice-$Version-cpu"
+} else {
+  $DistName    = "EasyVoice-$Version"
+}
 $Dist        = Join-Path $ProjectRoot "dist"
 $Stage       = Join-Path $Dist $DistName
 $RuntimeDir  = Join-Path $Stage "runtime"
@@ -125,33 +131,40 @@ $batText = (Get-Content (Join-Path $ProjectRoot "Start EasyVoice.bat") -Raw) -re
 Ok "app/、app_main.py、Start EasyVoice.bat 已就位"
 
 # ---- 5. 模型权重（0.6B）+ 许可声明 -------------------------------------------
-Step 5 "准备模型权重（0.6B）"
-$srcModelOrg = Join-Path $ProjectRoot "models\Qwen"
-$dstModelOrg = Join-Path $Stage "models\Qwen"
-$modelLeaf   = "Qwen3-TTS-12Hz-0___6B-Base"   # ModelScope 把 '.' 写成 '___'，tts_engine 据此解析
-if (Test-Path (Join-Path $srcModelOrg $modelLeaf)) {
-  Write-Host "  复制已下载模型 ..."
-  New-Item -ItemType Directory -Force -Path $dstModelOrg | Out-Null
-  robocopy "$srcModelOrg" "$dstModelOrg" /E /NFL /NDL /NJH /NJS /NP | Out-Null
-  if ($LASTEXITCODE -ge 8) { throw "模型复制失败（robocopy=$LASTEXITCODE）" }
+if ($Variant -eq "cpu") {
+  Step 5 "CPU 精简包：跳过内置模型（首次启动时在工具内下载）"
+  Copy-Item (Join-Path $ProjectRoot "assets\packaging\THIRD-PARTY-NOTICES.txt") `
+            (Join-Path $Stage "THIRD-PARTY-NOTICES.txt") -Force
+  Ok "已跳过模型；第三方声明已放置"
 } else {
-  Write-Host "  本地无模型，改用 modelscope 下载到打包目录 ..."
-  $env:MODELSCOPE_CACHE = (Join-Path $Stage "models")
-  & (Join-Path $EnvPath "python.exe") -c "from modelscope import snapshot_download; snapshot_download('$ModelId')"
-  if ($LASTEXITCODE -ne 0) { throw "模型下载失败" }
+  Step 5 "准备模型权重（0.6B）"
+  $srcModelOrg = Join-Path $ProjectRoot "models\Qwen"
+  $dstModelOrg = Join-Path $Stage "models\Qwen"
+  $modelLeaf   = "Qwen3-TTS-12Hz-0___6B-Base"   # ModelScope 把 '.' 写成 '___'，tts_engine 据此解析
+  if (Test-Path (Join-Path $srcModelOrg $modelLeaf)) {
+    Write-Host "  复制已下载模型 ..."
+    New-Item -ItemType Directory -Force -Path $dstModelOrg | Out-Null
+    robocopy "$srcModelOrg" "$dstModelOrg" /E /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw "模型复制失败（robocopy=$LASTEXITCODE）" }
+  } else {
+    Write-Host "  本地无模型，改用 modelscope 下载到打包目录 ..."
+    $env:MODELSCOPE_CACHE = (Join-Path $Stage "models")
+    & (Join-Path $EnvPath "python.exe") -c "from modelscope import snapshot_download; snapshot_download('$ModelId')"
+    if ($LASTEXITCODE -ne 0) { throw "模型下载失败" }
+  }
+  # Apache-2.0：模型目录内放置完整许可文本（再分发义务）
+  $apacheCache = Join-Path $Dist "_cache\LICENSE-Apache-2.0.txt"
+  if (-not (Test-Path $apacheCache)) {
+    New-Item -ItemType Directory -Force -Path (Split-Path $apacheCache) | Out-Null
+    Invoke-WebRequest -Uri "https://www.apache.org/licenses/LICENSE-2.0.txt" -OutFile $apacheCache -UseBasicParsing
+  }
+  $modelDir = Join-Path $dstModelOrg $modelLeaf
+  if (Test-Path $modelDir) { Copy-Item $apacheCache (Join-Path $modelDir "LICENSE") -Force }
+  # 顶层第三方许可声明（模型 / FFmpeg / 运行时）——模板随仓库版本控制
+  Copy-Item (Join-Path $ProjectRoot "assets\packaging\THIRD-PARTY-NOTICES.txt") `
+            (Join-Path $Stage "THIRD-PARTY-NOTICES.txt") -Force
+  Ok "模型许可(LICENSE) 与第三方声明(THIRD-PARTY-NOTICES) 已打包"
 }
-# Apache-2.0：模型目录内放置完整许可文本（再分发义务）
-$apacheCache = Join-Path $Dist "_cache\LICENSE-Apache-2.0.txt"
-if (-not (Test-Path $apacheCache)) {
-  New-Item -ItemType Directory -Force -Path (Split-Path $apacheCache) | Out-Null
-  Invoke-WebRequest -Uri "https://www.apache.org/licenses/LICENSE-2.0.txt" -OutFile $apacheCache -UseBasicParsing
-}
-$modelDir = Join-Path $dstModelOrg $modelLeaf
-if (Test-Path $modelDir) { Copy-Item $apacheCache (Join-Path $modelDir "LICENSE") -Force }
-# 顶层第三方许可声明（模型 / FFmpeg / 运行时）——模板随仓库版本控制
-Copy-Item (Join-Path $ProjectRoot "assets\packaging\THIRD-PARTY-NOTICES.txt") `
-          (Join-Path $Stage "THIRD-PARTY-NOTICES.txt") -Force
-Ok "模型许可(LICENSE) 与第三方声明(THIRD-PARTY-NOTICES) 已打包"
 
 # ---- 6. 用户数据空目录 -------------------------------------------------------
 Step 6 "创建用户数据目录"
