@@ -1,0 +1,11 @@
+.superpowers/
+docs/superpowers/
+models/
+outputs/
+voices/
+presets/
+__pycache__/
+*.pyc
+dist/
+runtime.zip
+ffmpeg/

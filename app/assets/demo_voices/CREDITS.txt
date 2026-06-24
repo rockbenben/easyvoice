@@ -1,0 +1,26 @@
+Demo voices — LibriVox Public-Domain Recordings
+Public Domain Mark 1.0 (https://creativecommons.org/publicdomain/mark/1.0/)
+
+These recordings are in the public domain. LibriVox volunteers donate their
+voices to the public domain. No rights reserved.
+
+Sources:
+  voice_en1.wav — "A Father of Women" by Alice Meynell, read by unknown volunteer
+    https://archive.org/download/father_of_women_1703_librivox/fatherofwomen_03_meynell_128kb.mp3
+
+  voice_en2.wav — "Foliage" by W. H. Davies, read by unknown volunteer
+    https://archive.org/download/foliage_1411_librivox/foliage_01_davies_128kb.mp3
+
+  voice_fr1.wav — "Fables de La Fontaine" (Book 5, Fable 10), read by unknown volunteer
+    https://archive.org/download/fables_de_la_fontaine_05_me_librivox/fables_05_10_lafontaine_me.mp3
+
+  voice_zh1.wav — "Three Hundred Tang Poems, Vol. 1 — Gan Yu Si Shou Zhi Er" (Mandarin reading)
+    by Zhang Jiuling, read by David Barnes
+    https://archive.org/download/300_tang_poems_vol_1_librivox/300tangpoems_vol_1_002.mp3
+    Public Domain — LibriVox recording released to the public domain by the reader.
+
+  voice_de1.wav — LibriVox, Sammlung deutscher Gedichte 018 (Public Domain Mark 1.0)
+    https://archive.org/details/sammlung_deutscher_gedichte_018_1506_librivox
+
+Each file has been trimmed to ~10 seconds (starting at 22s to skip the
+LibriVox disclaimer), converted to mono 24 kHz WAV for use as TTS reference audio.

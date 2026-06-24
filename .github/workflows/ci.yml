@@ -1,0 +1,26 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: System deps (libsndfile for soundfile)
+        run: sudo apt-get update && sudo apt-get install -y libsndfile1
+
+      # 测试只用到这几样；torch / qwen-tts 在运行时才惰性导入，单测无需安装（也避免拉 GB 级依赖）
+      - name: Install test deps
+        run: pip install "gradio>=6,<7" numpy soundfile opencc-python-reimplemented pytest
+
+      - name: Run tests
+        run: pytest -q

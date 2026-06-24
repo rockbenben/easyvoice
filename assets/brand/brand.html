@@ -1,0 +1,94 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@400;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{ --jade:#1C9C77; --jade-d:#0E5341; --mint:#8FE0C2; --ink:#1E2A23; --paper:#ECF1E9; }
+  *{ margin:0; box-sizing:border-box; }
+  body{ background:#cfd8d0; font-family:'Noto Sans SC',sans-serif; padding:40px; display:flex; flex-wrap:wrap; gap:40px; align-items:flex-start;}
+  .label{ font:11px 'Space Mono',monospace; letter-spacing:2px; color:#556; text-transform:uppercase; margin-bottom:8px;}
+  .cell{ background:#fff; padding:24px; border-radius:16px;}
+
+  /* ---- MARK variants (256) ---- */
+  .mark{ width:256px; height:256px; border-radius:58px; position:relative;
+    display:flex; align-items:center; justify-content:center; overflow:hidden;
+    background:linear-gradient(140deg,#0E5341 0%,#177A5C 55%,#1FA277 100%);
+    box-shadow:inset 0 3px 0 rgba(255,255,255,.14), inset 0 -10px 30px rgba(0,0,0,.18);}
+  .mark .sheng{ font-family:'Noto Serif SC',serif; font-weight:900; font-size:158px; color:#fff; line-height:1;}
+  .mark .qk{ position:absolute; font-family:'Noto Serif SC',serif; font-weight:700; font-size:62px; color:var(--mint);}
+  .mark .ql{ top:26px; left:32px;} .mark .qr{ bottom:14px; right:32px;}
+
+  #mark2 .sheng{ font-size:170px;}            /* 声 only */
+  #mark3 .sheng{ font-family:'Noto Serif SC'; font-size:170px;}  /* 易 */
+
+  /* ripple variant */
+  #mark4 .ripple{ position:relative; width:120px; height:120px;}
+  #mark4 .ripple span{ position:absolute; inset:0; margin:auto; border:6px solid var(--mint); border-radius:50%; opacity:.5;}
+  #mark4 .ripple .r1{ width:36px; height:36px; background:#fff; border:none;}
+  #mark4 .ripple .r2{ width:74px; height:74px;}
+  #mark4 .ripple .r3{ width:118px; height:118px; opacity:.28;}
+  #mark4 .qk{ color:#fff; opacity:.92;}
+
+  /* ---- FULL LOGO ---- */
+  #logo{ display:flex; align-items:center; gap:20px; background:#fff; padding:28px 36px; border-radius:16px;}
+  #logo .lm{ width:84px; height:84px; border-radius:20px; position:relative; flex:none;
+    display:flex; align-items:center; justify-content:center;
+    background:linear-gradient(140deg,#0E5341,#1FA277); box-shadow:inset 0 2px 0 rgba(255,255,255,.14);}
+  #logo .lm .sheng{ font-family:'Noto Serif SC',serif; font-weight:900; font-size:54px; color:#fff;}
+  #logo .lm .qk{ position:absolute; font-family:'Noto Serif SC',serif; font-weight:700; font-size:22px; color:var(--mint);}
+  #logo .lm .ql{ top:7px; left:11px;} #logo .lm .qr{ bottom:3px; right:11px;}
+  #logo .wm{ display:flex; flex-direction:column; gap:3px;}
+  #logo .zh{ font-family:'Noto Serif SC',serif; font-weight:900; font-size:46px; color:var(--ink); letter-spacing:3px; line-height:1;}
+  #logo .en{ font-family:'Space Mono',monospace; font-size:15px; letter-spacing:7px; color:var(--jade); text-transform:uppercase;}
+
+  /* ---- SOCIAL CARD 1200x630 ---- */
+  #card{ width:1200px; height:630px; border-radius:0; position:relative; overflow:hidden; color:#EAF4EE;
+    background:linear-gradient(135deg,#0C4C3B 0%,#15795C 58%,#1FA277 100%); padding:74px 80px;}
+  #card .wmk{ position:absolute; right:-30px; bottom:-150px; font-family:'Noto Serif SC',serif; font-weight:900;
+    font-size:620px; line-height:1; color:#CFEEDF; opacity:.07; pointer-events:none;}
+  #card .top{ display:flex; align-items:center; gap:16px; position:relative; z-index:1;}
+  #card .cm{ width:66px; height:66px; border-radius:16px; display:flex; align-items:center; justify-content:center;
+    background:rgba(255,255,255,.12); position:relative;}
+  #card .cm .sheng{ font-family:'Noto Serif SC',serif; font-weight:900; font-size:42px; color:#fff;}
+  #card .brand-zh{ font-family:'Noto Serif SC',serif; font-weight:900; font-size:38px; letter-spacing:3px; color:#fff;}
+  #card .brand-en{ font-family:'Space Mono',monospace; font-size:15px; letter-spacing:6px; color:var(--mint);}
+  #card .promise{ position:relative; z-index:1; font-family:'Noto Serif SC',serif; font-weight:700; font-size:84px;
+    line-height:1.15; margin-top:78px; color:#fff; letter-spacing:1px;}
+  #card .promise .qk{ color:var(--mint);}
+  #card .sub{ position:relative; z-index:1; font-family:'Noto Serif SC',serif; font-weight:400; font-size:34px;
+    color:#CFEAD D; color:#CFEADB; margin-top:14px;}
+  #card .tag{ position:absolute; left:80px; bottom:62px; z-index:1; font-size:21px; color:#A9D8C6; letter-spacing:.5px;}
+  #card .pill{ position:absolute; right:80px; bottom:60px; z-index:1; font:600 18px 'Noto Sans SC';
+    background:rgba(255,255,255,.14); color:#EAF4EE; padding:10px 20px; border-radius:999px;}
+</style></head><body>
+
+<div class="cell"><div class="label">mark 1 · 声+「」</div>
+  <div class="mark" id="mark1"><span class="qk ql">「</span><span class="sheng">声</span><span class="qk qr">」</span></div></div>
+
+<div class="cell"><div class="label">mark 2 · 声</div>
+  <div class="mark" id="mark2"><span class="sheng">声</span></div></div>
+
+<div class="cell"><div class="label">mark 3 · 易</div>
+  <div class="mark" id="mark3"><span class="sheng">易</span></div></div>
+
+<div class="cell"><div class="label">mark 4 · 「」+ripple</div>
+  <div class="mark" id="mark4"><span class="qk ql">「</span>
+    <div class="ripple"><span class="r3"></span><span class="r2"></span><span class="r1"></span></div>
+    <span class="qk qr">」</span></div></div>
+
+<div class="cell" style="width:100%"><div class="label">full logo</div>
+  <div id="logo"><div class="lm"><span class="qk ql">「</span><span class="sheng">声</span><span class="qk qr">」</span></div>
+    <div class="wm"><span class="zh">易声</span><span class="en">EasyVoice</span></div></div></div>
+
+<div class="cell" style="width:100%"><div class="label">social card 1200×630</div>
+  <div id="card">
+    <span class="wmk">声</span>
+    <div class="top"><div class="cm"><span class="sheng">声</span></div>
+      <div><div class="brand-zh">易声</div><div class="brand-en">EASYVOICE</div></div></div>
+    <div class="promise"><span class="qk">「</span>把文字，说出来<span class="qk">」</span></div>
+    <div class="sub">Turn text into a voice — local, free, private</div>
+    <div class="tag">本地运行 · 完全免费 · 声音不离开你的电脑 · 10 种语言声音克隆</div>
+    <div class="pill">⚡ 双击即用 · No setup</div>
+  </div></div>
+
+</body></html>

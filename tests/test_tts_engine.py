@@ -1,0 +1,160 @@
+import numpy as np
+from app import tts_engine as te
+
+
+def test_select_no_cuda_forces_cpu_06b(monkeypatch):
+    monkeypatch.setattr(te, "_cuda_available", lambda: False)
+    assert te.select_device_and_model(has_17b=True) == ("cpu", te.config.MODEL_06B)
+
+
+def test_select_cuda_prefers_17b_when_present(monkeypatch):
+    monkeypatch.setattr(te, "_cuda_available", lambda: True)
+    assert te.select_device_and_model(has_17b=True) == ("cuda", te.config.MODEL_17B)
+    assert te.select_device_and_model(has_17b=False) == ("cuda", te.config.MODEL_06B)
+
+
+def test_synthesize_writes_wav(tmp_path, monkeypatch):
+    monkeypatch.setattr(te.config, "OUTPUTS_DIR", tmp_path)
+    monkeypatch.setattr(te, "_cuda_available", lambda: False)
+    monkeypatch.setattr(te, "has_17b_downloaded", lambda: False)
+
+    captured_kwargs = {}
+
+    def _mock_raw(text, lang, ref, device, model_id, temperature=0.9, top_p=0.9, **kwargs):
+        captured_kwargs["temperature"] = temperature
+        captured_kwargs["top_p"] = top_p
+        return [np.zeros(2400, dtype=np.float32)], 24000
+
+    monkeypatch.setattr(te, "_raw_synthesize", _mock_raw)
+    out = te.synthesize("你好", "chinese", str(tmp_path / "ref.wav"),
+                        temperature=0.7, top_p=0.85)
+    assert out.endswith(".wav")
+    import os; assert os.path.getsize(out) > 0
+    import soundfile as sf
+    info = sf.info(out)
+    assert info.samplerate == 24000
+    assert info.frames > 0
+    # Verify temperature/top_p were forwarded
+    assert captured_kwargs["temperature"] == 0.7
+    assert captured_kwargs["top_p"] == 0.85
+
+
+def test_synthesize_calls_apply_speed_when_speed_not_1(tmp_path, monkeypatch):
+    """When speed != 1.0, _apply_speed must be called; when speed == 1.0, it must NOT."""
+    monkeypatch.setattr(te.config, "OUTPUTS_DIR", tmp_path)
+    monkeypatch.setattr(te, "_cuda_available", lambda: False)
+    monkeypatch.setattr(te, "has_17b_downloaded", lambda: False)
+    monkeypatch.setattr(te, "_raw_synthesize",
+                        lambda *a, **k: ([np.zeros(2400, dtype=np.float32)], 24000))
+
+    apply_speed_calls = []
+
+    def _mock_apply_speed(wav_path, speed):
+        apply_speed_calls.append((wav_path, speed))
+        return wav_path + ".sped"
+
+    monkeypatch.setattr(te, "_apply_speed", _mock_apply_speed)
+
+    # speed=1.5 → _apply_speed invoked
+    apply_speed_calls.clear()
+    te.synthesize("hello", "english", str(tmp_path / "ref.wav"), speed=1.5)
+    assert len(apply_speed_calls) == 1
+    assert apply_speed_calls[0][1] == 1.5
+
+    # speed=1.0 → _apply_speed NOT invoked
+    apply_speed_calls.clear()
+    te.synthesize("hello", "english", str(tmp_path / "ref.wav"), speed=1.0)
+    assert len(apply_speed_calls) == 0
+
+
+def test_normalize_traditional_to_simplified():
+    assert te.normalize_text("發財與麵條", "chinese") == "发财与面条"
+
+
+def test_normalize_non_chinese_untouched():
+    assert te.normalize_text("Bonjour", "french") == "Bonjour"
+
+
+def test_apply_speed_graceful_error_fallback(monkeypatch):
+    """_apply_speed should return the original path unchanged when ffmpeg fails (FileNotFoundError)."""
+    def _mock_subprocess_run(*args, **kwargs):
+        raise FileNotFoundError("ffmpeg not found")
+
+    monkeypatch.setattr(te.subprocess, "run", _mock_subprocess_run)
+
+    original_path = "/some/in.wav"
+    result = te._apply_speed(original_path, 1.5)
+    assert result == original_path
+
+
+def test_split_text_chunks_and_lossless():
+    short = te._split_text("你好。", 200)
+    assert short == ["你好。"]                       # 短文本不切
+    long = "句子一。" * 100                           # 400 字
+    chunks = te._split_text(long, 50)
+    assert len(chunks) > 1
+    assert all(len(c) <= 50 for c in chunks)         # 每块不超限
+    assert "".join(chunks) == long                   # 不丢字
+
+
+def test_synthesize_splits_and_concatenates(tmp_path, monkeypatch):
+    monkeypatch.setattr(te.config, "OUTPUTS_DIR", tmp_path)
+    monkeypatch.setattr(te, "_cuda_available", lambda: False)
+    monkeypatch.setattr(te, "has_17b_downloaded", lambda: False)
+    calls = []
+
+    def _mock_raw(text, *a, **k):
+        calls.append(text)
+        return [np.zeros(1200, dtype=np.float32)], 24000   # 每段 0.05s
+
+    monkeypatch.setattr(te, "_raw_synthesize", _mock_raw)
+    out = te.synthesize("测试句子。" * 80, "chinese", "ref.wav")   # 400 字 → 多段
+    assert len(calls) > 1
+    import soundfile as sf
+    assert sf.info(out).frames > 1200                  # 拼接(含段间停顿)后比单段长
+
+
+def test_warmup_calls_load(monkeypatch):
+    loaded = []
+    monkeypatch.setattr(te, "has_17b_downloaded", lambda: False)
+    monkeypatch.setattr(te, "select_device_and_model", lambda h: ("cpu", "m"))
+    monkeypatch.setattr(te, "_load", lambda mid, dev: loaded.append((mid, dev)))
+    te.warmup()
+    assert loaded == [("m", "cpu")]
+
+
+def test_parse_subtitles_srt_vtt_lrc():
+    srt = "1\n00:00:01,000 --> 00:00:03,000\n你好世界\n\n2\n00:00:04,000 --> 00:00:06,500\n第二句\n"
+    c = te.parse_subtitles(srt)
+    assert len(c) == 2
+    assert c[0]["start"] == 1.0 and c[0]["end"] == 3.0 and c[0]["text"] == "你好世界"
+    assert c[1]["start"] == 4.0 and c[1]["end"] == 6.5
+    v = te.parse_subtitles("WEBVTT\n\n00:00:00.500 --> 00:00:02.000\nHello\n")
+    assert len(v) == 1 and v[0]["start"] == 0.5 and v[0]["text"] == "Hello"
+    lrc = te.parse_subtitles("[00:01.00]第一行\n[00:03.50]第二行\n")
+    assert len(lrc) == 2 and lrc[0]["start"] == 1.0 and lrc[0]["end"] == 3.5 and lrc[1]["start"] == 3.5
+
+
+def test_synthesize_subtitles_assembles_timeline(tmp_path, monkeypatch):
+    monkeypatch.setattr(te.config, "OUTPUTS_DIR", tmp_path)
+    monkeypatch.setattr(te, "_cuda_available", lambda: False)
+    monkeypatch.setattr(te, "has_17b_downloaded", lambda: False)
+
+    class _Fake:
+        def generate_voice_clone(self, text, **k):     # 批量：每句 0.1s
+            return [np.zeros(2400, dtype=np.float32) for _ in text], 24000
+
+    monkeypatch.setattr(te, "_load", lambda mid, dev: _Fake())
+    cues = [{"start": 0.0, "end": 1.0, "text": "a"}, {"start": 2.0, "end": 3.0, "text": "b"}]
+    wav, srt = te.synthesize_subtitles(cues, "chinese", "ref.wav")
+    import soundfile as sf
+    import os
+    assert abs(sf.info(wav).duration - 2.1) < 0.05    # 第二句 2.0s 开始 + 0.1s = 2.1s
+    assert os.path.exists(srt) and "-->" in open(srt, encoding="utf-8").read()
+
+
+def test_cues_to_srt_format():
+    srt = te.cues_to_srt([(0.0, 1.5, "hi"), (2.0, 1.0, "yo")])
+    assert "00:00:00,000 --> 00:00:01,500" in srt
+    assert "00:00:02,000 --> 00:00:03,000" in srt
+    assert "hi" in srt and "yo" in srt

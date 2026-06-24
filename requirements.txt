@@ -1,0 +1,20 @@
+# Core TTS engine
+qwen-tts
+
+# Audio I/O
+soundfile
+
+# UI
+gradio
+
+# Chinese text processing
+opencc-python-reimplemented
+
+# Testing
+pytest
+
+# ModelScope for China-region model download
+modelscope
+
+# PyTorch — install the CUDA build manually (not listed here to avoid pulling CPU-only wheel):
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
