@@ -24,7 +24,10 @@ HEAD = (
     'if(changed){window.location.replace(u.href);return;}'
     # theme is light & already applied by Gradio on load → drop the ugly ?__theme= from the address bar
     "if(p.has('__theme')){p.delete('__theme');history.replaceState(null,'',u.pathname+(p.toString()?'?'+p.toString():'')+u.hash);}"
-    "document.documentElement.setAttribute('data-uilang',lang||'auto');"
+    # 未显式选语言时，按浏览器语言点亮对应项(否则三项都不高亮，看不出当前语言)
+    "var dl=lang;if(!dl){var nl=(navigator.language||'').toLowerCase();"
+    "dl=(nl.indexOf('en')===0)?'en':((nl.indexOf('zh-tw')>=0||nl.indexOf('zh-hk')>=0||nl.indexOf('zh-mo')>=0||nl.indexOf('hant')>=0)?'zh-Hant':'zh');}"
+    "document.documentElement.setAttribute('data-uilang',dl);"
     '}catch(e){}})();</script>'
 )
 
@@ -136,7 +139,8 @@ html, body, gradio-app{ background:var(--paper)!important; }
 .ev-lang a:hover{ color:#fff; background:rgba(255,255,255,.16);}
 html[data-uilang="zh"] .ev-lang .lang-zh,
 html[data-uilang="zh-Hant"] .ev-lang .lang-zhhant,
-html[data-uilang="en"] .ev-lang .lang-en{ background:#fff; color:var(--jade-d); font-weight:700;}
+html[data-uilang="en"] .ev-lang .lang-en{ background:#fff; color:var(--jade-d); font-weight:800;
+  box-shadow:0 1px 3px rgba(0,0,0,.2);}
 .ev-dot{ width:8px; height:8px; border-radius:50%;}
 .ev-dot.live{ background:#8AF0C4;}
 .ev-dot.idle{ background:#FFC56B;}
@@ -462,7 +466,6 @@ def do_generate(text, lang, voice_id, temperature=0.9, top_p=0.9, speed=1.0,
         ref = voice_library.get_audio_path(voice_id)
     except KeyError:
         raise gr.Error(i18n.t(_req_tb(request), "err.voice_missing"))
-    ref_text = voice_library.get_ref_text(voice_id)
     tb = _req_tb(request)
 
     def cb(done, total):                                # 实时进度："已生成 X/Y 字"
@@ -475,7 +478,7 @@ def do_generate(text, lang, voice_id, temperature=0.9, top_p=0.9, speed=1.0,
     return tts_engine.synthesize(
         text, lang, ref, temperature, top_p, speed,
         top_k=int(top_k), repetition_penalty=repetition_penalty,
-        max_new_tokens=int(max_new_tokens), ref_text=ref_text, seed=int(seed or 0),
+        max_new_tokens=int(max_new_tokens), seed=int(seed or 0),
         progress_cb=cb)
 
 
@@ -503,13 +506,16 @@ def _loc_tok_estimate(tokens, request: gr.Request):
     return do_tok_estimate(tokens, _lang_from_request(request))
 
 
-def do_add_voice(name, ref_path, ref_text="", bump=0, request: gr.Request = None):
+def do_add_voice(name, ref_path, bump=0, request: gr.Request = None):
     if not name or not name.strip():
         raise gr.Error(i18n.t(_req_tb(request), "err.need_voice_name"))
     if not ref_path:
         raise gr.Error(i18n.t(_req_tb(request), "err.need_ref_audio"))
-    voice_library.add_voice(name, ref_path, ref_text)   # front=True → 新音色置顶
-    return gr.update(choices=_voice_choices()), bump + 1  # -> (配音 voice_dd, _bump 触发重渲染)
+    voice_library.add_voice(name, ref_path)             # front=True → 新音色置顶
+    # 保存后清空捕获态(名称/_cap/试听器)：否则再点一次「添加」(含误双击)会用残留路径重复建同一音色
+    return (gr.update(choices=_voice_choices()), bump + 1,
+            gr.update(value=""), None, gr.update(value=None, visible=False))
+    # -> (配音 voice_dd, _bump 触发重渲染, 清名称, 清 _cap, 隐藏试听器)
 
 
 # ── 音色库逐行管理(gr.render 内联调用) ──
@@ -526,9 +532,13 @@ def do_voice_move(voice_id, delta, bump):
     return bump + 1, gr.update(choices=_voice_choices())
 
 
-def do_voice_delete(voice_id, bump):
+def do_voice_delete(voice_id, bump, current=None):
     voice_library.delete_voice(voice_id)
-    return bump + 1, None, gr.update(choices=_voice_choices())  # 重渲染 / 清待确认 / 刷新 voice_dd
+    choices = _voice_choices()
+    valid = [vid for _, vid in choices]
+    # 删的若正是配音里选中的音色 → 改选第一个剩余(否则下拉残留已删音色)；否则保持原选
+    value = current if current in valid else (valid[0] if valid else None)
+    return bump + 1, None, gr.update(choices=choices, value=value)  # 重渲染 / 清待确认 / 刷新并修正 voice_dd
 
 
 def do_save_preset(name, lang, voice_id, temperature, top_p, speed, pbump=0,
@@ -680,12 +690,15 @@ def do_subtitle_preview(file_path, request: gr.Request = None):
         content = open(file_path, encoding="utf-8", errors="ignore").read()
     except Exception:
         return ""
-    cues = tts_engine.parse_subtitles(content)
+    cues, dropped = tts_engine.parse_subtitles_ex(content)
     tb = _req_tb(request)
     if not cues:
         return i18n.t(tb, "err.no_cues")
     mins = max(c["end"] for c in cues) / 60.0
-    return i18n.t(tb, "sub.parsed").replace("{n}", str(len(cues))).replace("{m}", f"{mins:.1f}")
+    msg = i18n.t(tb, "sub.parsed").replace("{n}", str(len(cues))).replace("{m}", f"{mins:.1f}")
+    if dropped:                                          # 超 6h 上限被丢 → 明示，避免静默缺尾
+        msg += " · " + i18n.t(tb, "sub.dropped").replace("{d}", str(dropped))
+    return msg
 
 
 def do_subtitle_dub(file_path, voice_id, lang, request: gr.Request = None, progress=gr.Progress()):
@@ -699,7 +712,6 @@ def do_subtitle_dub(file_path, voice_id, lang, request: gr.Request = None, progr
     cues = tts_engine.parse_subtitles(content)
     if not cues:
         raise gr.Error(i18n.t(_req_tb(request), "err.no_cues"))
-    ref_text = voice_library.get_ref_text(voice_id)
     tb = _req_tb(request)
 
     def cb(done, total):                                # 实时进度："已合成 X/Y 条"
@@ -709,7 +721,7 @@ def do_subtitle_dub(file_path, voice_id, lang, request: gr.Request = None, progr
         except Exception:
             pass
 
-    return tts_engine.synthesize_subtitles(cues, lang, ref, ref_text=ref_text, progress_cb=cb)
+    return tts_engine.synthesize_subtitles(cues, lang, ref, progress_cb=cb)
 
 
 def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
@@ -735,7 +747,7 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                             dub_preset = gr.Dropdown(_preset_names, value=_default_preset,
                                                      label=I18N("preset.quick"))
                             lang_dd = gr.Dropdown(_lang_choices(), label=I18N("field.lang"),
-                                                  info=I18N("field.lang_info"), value="chinese")
+                                                  info=I18N("field.lang_info"), value="auto")
                             voice_dd = gr.Dropdown(_voice_choices(), label=I18N("field.voice"),
                                                    info=I18N("field.voice_info"), value=_first_voice)
                             style_radio = gr.Radio(
@@ -801,8 +813,10 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                                placeholder=I18N("voice.name_ph"))
                             vref = gr.Audio(label=I18N("voice.ref"), type="filepath",
                                             elem_classes=["ev-audio"])
-                            vref_text = gr.Textbox(label=I18N("voice.ref_text"),
-                                                   info=I18N("voice.ref_text_info"), lines=2)
+                            # 录音/上传后回显到一个只读播放器：可靠播放，绕开录音器自带预览的波形毛病
+                            vref_play = gr.Audio(label=I18N("voice.ref_preview"), interactive=False,
+                                                 visible=False, elem_classes=["ev-audio"])
+                            _cap = gr.State(None)            # 捕获到的音频路径(录音器清空后仍保留，供保存)
                             vadd = gr.Button(I18N("voice.add"), variant="primary")
                     with gr.Column(min_width=320):
                         with gr.Group(elem_classes=["ev-card"]):
@@ -834,8 +848,8 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                                             variant="stop", scale=1, min_width=72)
                                             no = gr.Button(i18n.t(vtb, "voice.del_no"),
                                                            scale=1, min_width=72)
-                                        yes.click(lambda b, _id=vid: do_voice_delete(_id, b),
-                                                  [_bump], [_bump, _pending, voice_dd])
+                                        yes.click(lambda b, cur, _id=vid: do_voice_delete(_id, b, cur),
+                                                  [_bump, voice_dd], [_bump, _pending, voice_dd])
                                         no.click(lambda: None, None, [_pending])
                                     elif vid == editing:                     # 编辑态：只改名称(按钮另起一行)
                                         with gr.Group(elem_classes=["ev-editbox"]):
@@ -856,13 +870,26 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                             up = gr.Button("↑", scale=0, min_width=44, interactive=(i > 0))
                                             dn = gr.Button("↓", scale=0, min_width=44, interactive=(i < n - 1))
                                             dl = gr.Button("🗑", scale=0, min_width=44)
+                                        gr.Audio(voice_library.get_audio_path(vid), interactive=False,
+                                                 show_label=False, container=False,
+                                                 elem_classes=["ev-audio", "ev-vaudio"])
                                         ed.click(lambda _id=vid: _id, None, [_vediting])
                                         up.click(lambda b, _id=vid: do_voice_move(_id, -1, b),
                                                  [_bump], [_bump, voice_dd])
                                         dn.click(lambda b, _id=vid: do_voice_move(_id, 1, b),
                                                  [_bump], [_bump, voice_dd])
                                         dl.click(lambda _id=vid: _id, None, [_pending])
-                vadd.click(do_add_voice, [vname, vref, vref_text, _bump], [voice_dd, _bump])
+                vadd.click(do_add_voice, [vname, _cap, _bump],
+                           [voice_dd, _bump, vname, _cap, vref_play])  # 用捕获的路径保存，存后清捕获态
+
+                def _capture_ref(f, cap):
+                    # 录/传到音频 → 移到只读试听器、记下路径、清空录音器(避免它那个会坏的内嵌预览)；
+                    # 清空触发的二次 change(f=None) 不动已捕获结果。
+                    if f:
+                        return gr.update(value=f, visible=True), f, None
+                    return gr.update(), cap, gr.update()
+                vref.change(_capture_ref, [vref, _cap], [vref_play, _cap, vref],
+                            show_progress="hidden")
             # ── 常用方案: 逐行管理(套用/保存在『配音』里，这里只整理) ──────
             with gr.Tab(I18N("tab.presets")) as tab_presets:
                 preset_guide = gr.Markdown(I18N("guide.presets"), elem_classes=["ev-guide"])
@@ -906,7 +933,7 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                             sub_voice = gr.Dropdown(_voice_choices(), label=I18N("field.voice"),
                                                     info=I18N("field.voice_info"), value=_first_voice)
                             sub_lang = gr.Dropdown(_lang_choices(), label=I18N("field.lang"),
-                                                   info=I18N("field.lang_info"), value="chinese")
+                                                   info=I18N("field.lang_info"), value="auto")
                     with gr.Column(scale=3, min_width=360):
                         with gr.Group(elem_classes=["ev-card"]):
                             sub_gen = gr.Button(I18N("sub.generate"), variant="primary",
@@ -929,7 +956,7 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
             lang_dd, voice_dd, style_radio, speed, accordion, adv_hint, temperature, top_p,
             top_k, rep_pen, max_tokens, tok_est, seed_in,
             text_in, gen, audio_out, voice_hint,
-            vname, vref, vref_text, vadd, manage_hint, _vloc,
+            vname, vref, vref_play, vadd, manage_hint, _vloc,
             preset_guide, dub_preset, dub_pname, dub_save,
             sub_guide, sub_file, sub_voice, sub_lang, sub_gen, sub_audio, sub_srt,
             footer,
@@ -973,7 +1000,7 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 voice_hint: gr.update(value=L("voice.hint")),
                 vname: gr.update(label=L("voice.name"), placeholder=L("voice.name_ph")),
                 vref: gr.update(label=L("voice.ref")),
-                vref_text: gr.update(label=L("voice.ref_text"), info=L("voice.ref_text_info")),
+                vref_play: gr.update(label=L("voice.ref_preview")),
                 vadd: gr.update(value=L("voice.add")),
                 manage_hint: gr.update(value=L("voice.manage_hint")),
                 _vloc: loc,
@@ -990,6 +1017,32 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 sub_srt: gr.update(label=L("sub.srt")),
                 footer: gr.update(value=_footer_html(loc)),
             }
+
+        # ── 记住配音设置：浏览器 localStorage 持久化(换会话/重启自动恢复上次选择)──
+        # 不持久化 temp/top_p：它们由 style 经 do_apply_style 派生(style_radio.change→温度/top_p)。
+        # 若独立持久化，重载时恢复 style 会触发该链路，用风格固定值覆盖刚恢复的 temp/top_p，
+        # 并经 .change 把固定值写回 localStorage —— 既丢手调值又污染存档。恢复 style 即可正确重算二者。
+        _PKEYS = ["lang", "voice", "style", "speed", "top_k", "rep_pen", "max_tokens", "seed"]
+        _persist = [lang_dd, voice_dd, style_radio, speed, top_k, rep_pen, max_tokens, seed_in]
+        _settings = gr.BrowserState({}, storage_key="ev_dub_settings")
+
+        def _save_settings(*vals):
+            return dict(zip(_PKEYS, vals))
+        for _c in _persist:
+            _c.change(_save_settings, _persist, _settings, show_progress="hidden")
+
+        def _restore_settings(st):
+            st = st or {}
+            valid = [vid for _, vid in _voice_choices()]
+            ups = []
+            for k, _comp in zip(_PKEYS, _persist):
+                v = st.get(k)
+                if v is None or (k == "voice" and v not in valid):   # 缺省 / 上次音色已删 → 不动
+                    ups.append(gr.update())
+                else:
+                    ups.append(gr.update(value=v))
+            return ups
+        demo.load(_restore_settings, _settings, _persist, show_progress="hidden")
 
         demo.load(_relabel, None, _relabel_targets, show_progress="hidden")
         demo.queue()

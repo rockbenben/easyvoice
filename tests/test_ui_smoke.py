@@ -96,6 +96,45 @@ def test_do_voice_delete_clears_and_bumps(monkeypatch, tmp_path):
     assert deleted == ["voice-123"]
     assert bump == 5 and pending is None   # +1 重渲染、清空待确认
 
+def test_do_voice_delete_resets_stale_selection(monkeypatch, tmp_path):
+    """删除配音里选中的音色 → voice_dd 改选第一个剩余(否则下拉残留已删音色)；删非选中则保持。"""
+    from app import ui, voice_library, config
+    monkeypatch.setattr(config, "VOICES_DIR", tmp_path / "v")
+    monkeypatch.setattr(voice_library, "delete_voice", lambda vid: None)
+    monkeypatch.setattr(voice_library, "list_voices", lambda: [{"id": "b", "name": "B"}])  # 删后剩 b
+    _b, _p, upd = ui.do_voice_delete("a", 1, current="a")            # 选中的就是被删的 a
+    assert (upd["value"] if isinstance(upd, dict) else getattr(upd, "value", None)) == "b"
+    _b2, _p2, upd2 = ui.do_voice_delete("a", 1, current="b")         # 选中 b(没删) → 保持 b
+    assert (upd2["value"] if isinstance(upd2, dict) else getattr(upd2, "value", None)) == "b"
+
+
+def test_do_subtitle_preview_warns_when_cues_dropped(monkeypatch, tmp_path):
+    """超 6h 上限的字幕被丢时,预览须明示(否则配音会静默缺尾)；全正常则不提示。"""
+    from app import ui, config
+    monkeypatch.setattr(config, "VOICES_DIR", tmp_path / "v")
+    f = tmp_path / "s.srt"
+    f.write_text("1\n99:00:00,000 --> 99:00:05,000\nA\n\n"
+                 "2\n00:00:01,000 --> 00:00:02,000\nB\n", encoding="utf-8")
+    assert "已忽略" in ui.do_subtitle_preview(str(f))          # request=None → 简体
+    ok = tmp_path / "ok.srt"
+    ok.write_text("1\n00:00:01,000 --> 00:00:02,000\nB\n", encoding="utf-8")
+    assert "已忽略" not in ui.do_subtitle_preview(str(ok))
+
+
+def test_do_add_voice_resets_capture_after_save(monkeypatch, tmp_path):
+    """保存后必须清空 _cap：否则再点一次「添加」(含误双击)会用残留路径重复建同一音色。"""
+    from app import ui, voice_library, config
+    monkeypatch.setattr(config, "VOICES_DIR", tmp_path / "v")
+    added = []
+    monkeypatch.setattr(voice_library, "add_voice", lambda n, p, *a, **k: added.append((n, p)))
+    monkeypatch.setattr(voice_library, "list_voices", lambda: [{"id": "x", "name": "A"}])
+    ret = ui.do_add_voice("A", str(tmp_path / "ref.wav"), 0)
+    # ret = (voice_dd 更新, bump, vname 更新, _cap, vref_play 更新)
+    assert added == [("A", str(tmp_path / "ref.wav"))]
+    assert ret[1] == 1                  # bump+1 触发重渲染
+    assert ret[3] is None               # _cap 清空 → 第二次点击无残留路径，不会重复添加
+
+
 def test_do_voice_save_edit_renames(monkeypatch, tmp_path):
     from app import ui, voice_library, config
     monkeypatch.setattr(config, "VOICES_DIR", tmp_path / "v")
@@ -139,13 +178,15 @@ def test_do_generate_raises_on_stale_voice_id(monkeypatch, tmp_path):
     with pytest.raises(gr.Error):
         ui.do_generate(text="你好", lang="chinese", voice_id="stale-id")
 
-def test_do_add_voice_returns_two_updates(monkeypatch, tmp_path):
+def test_do_add_voice_returns_reset_updates(monkeypatch, tmp_path):
     from app import ui, voice_library, config
     monkeypatch.setattr(config, "VOICES_DIR", tmp_path)
     monkeypatch.setattr(voice_library, "add_voice", lambda name, ref, rt="": {"id": "x", "name": name, "audio": "x.wav"})
     monkeypatch.setattr(voice_library, "list_voices", lambda: [{"id": "x", "name": "n", "audio": "x.wav"}])
     out = ui.do_add_voice("n", "ref.wav")
-    assert isinstance(out, tuple) and len(out) == 2
+    # (voice_dd, _bump, vname清空, _cap清空, vref_play隐藏) —— _cap 必须清空以防再次点击重复添加
+    assert isinstance(out, tuple) and len(out) == 5
+    assert out[3] is None
 
 def test_do_save_preset_includes_params(monkeypatch, tmp_path):
     from app import ui, presets, config
