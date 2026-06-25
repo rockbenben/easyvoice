@@ -202,3 +202,31 @@ def test_ensure_model_raises_clear_error_on_failure(monkeypatch, tmp_path):
     with pytest.raises(RuntimeError) as ei:
         tts_engine.ensure_model("Qwen/Qwen3-TTS-12Hz-0.6B-Base")
     assert "网络" in str(ei.value) or "network" in str(ei.value).lower()
+
+
+def test_add_bundled_ffmpeg_to_path_prepends_dir(monkeypatch, tmp_path):
+    import os
+    from app import tts_engine, config
+    ff = tmp_path / "ffmpeg" / "ffmpeg.exe"
+    ff.parent.mkdir(parents=True)
+    ff.write_bytes(b"")
+    monkeypatch.setattr(config, "ROOT", tmp_path)        # 让 _ffmpeg_exe 命中随包副本
+    monkeypatch.setenv("PATH", "C:\\existing")
+    tts_engine.add_bundled_ffmpeg_to_path()
+    parts = os.environ["PATH"].split(os.pathsep)
+    assert parts[0] == str(ff.parent)                    # 随包 ffmpeg 目录被前置
+    assert "C:\\existing" in parts                       # 原 PATH 保留
+
+
+def test_add_bundled_ffmpeg_to_path_idempotent(monkeypatch, tmp_path):
+    import os
+    from app import tts_engine, config
+    ff = tmp_path / "ffmpeg" / "ffmpeg.exe"
+    ff.parent.mkdir(parents=True)
+    ff.write_bytes(b"")
+    monkeypatch.setattr(config, "ROOT", tmp_path)
+    monkeypatch.setenv("PATH", "C:\\existing")
+    tts_engine.add_bundled_ffmpeg_to_path()
+    tts_engine.add_bundled_ffmpeg_to_path()              # 再调一次不应重复添加
+    parts = os.environ["PATH"].split(os.pathsep)
+    assert parts.count(str(ff.parent)) == 1

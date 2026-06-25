@@ -12,6 +12,7 @@ def test_main_builds_and_launches(monkeypatch):
     monkeypatch.setattr(app_main.seed, "seed_defaults", lambda: calls.setdefault("seeded", True))
     monkeypatch.setattr(app_main.tts_engine, "warmup", lambda: None)  # 别在测试里真加载模型
     monkeypatch.setattr(app_main.tts_engine, "ensure_model", lambda mid: None)
+    monkeypatch.setattr(app_main.tts_engine, "add_bundled_ffmpeg_to_path", lambda: None)
     monkeypatch.setattr(app_main.ui.config, "ensure_dirs", lambda: None)
     app_main.main(open_browser=True)
     assert calls.get("seeded") is True
@@ -30,7 +31,9 @@ def test_main_ensures_model_before_launch(monkeypatch):
     monkeypatch.setattr(app_main.seed, "seed_defaults", lambda: None)
     monkeypatch.setattr(app_main.tts_engine, "warmup", lambda: None)
     monkeypatch.setattr(app_main.ui.config, "ensure_dirs", lambda: None)
+    monkeypatch.setattr(app_main.tts_engine, "add_bundled_ffmpeg_to_path",
+                        lambda: order.append("ffmpeg"))
     monkeypatch.setattr(app_main.tts_engine, "ensure_model",
                         lambda mid: order.append("ensure_model"))
     app_main.main(open_browser=False)
-    assert order == ["ensure_model", "launch"]
+    assert order == ["ffmpeg", "ensure_model", "launch"]   # 先配 ffmpeg、再下模型、最后起界面

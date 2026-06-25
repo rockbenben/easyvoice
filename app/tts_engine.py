@@ -130,6 +130,19 @@ def _ffmpeg_exe() -> str:
     return shutil.which("ffmpeg") or "ffmpeg"
 
 
+def add_bundled_ffmpeg_to_path() -> None:
+    """把 ffmpeg 所在目录加进 PATH，让 pydub / gradio / torchaudio 等也能找到它。
+    整合包里 ffmpeg 只在 ffmpeg\\ 子目录、不在 PATH，导致 gradio(pydub) 转码录音失败 →
+    “录制音色后无法播放”。这里在启动时把它前置到 PATH。幂等；找不到具体 ffmpeg 则不动。"""
+    import os
+    exe = _ffmpeg_exe()
+    if not os.path.isabs(exe) or not os.path.exists(exe):
+        return
+    d = os.path.dirname(exe)
+    if d not in os.environ.get("PATH", "").split(os.pathsep):
+        os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+
+
 def _apply_speed(wav_path: str, speed: float) -> str:
     """Post-process WAV with ffmpeg atempo to change speed (pitch-preserving).
 
