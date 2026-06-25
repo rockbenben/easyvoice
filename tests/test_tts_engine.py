@@ -254,11 +254,11 @@ def test_add_bundled_ffmpeg_to_path_prepends_dir(monkeypatch, tmp_path):
     ff.parent.mkdir(parents=True)
     ff.write_bytes(b"")
     monkeypatch.setattr(config, "ROOT", tmp_path)        # 让 _ffmpeg_exe 命中随包副本
-    monkeypatch.setenv("PATH", "C:\\existing")
+    monkeypatch.setenv("PATH", "PREEXISTING")    # 不含 os.pathsep，跨平台(Linux ':' / Windows ';')都安全
     tts_engine.add_bundled_ffmpeg_to_path()
     parts = os.environ["PATH"].split(os.pathsep)
     assert parts[0] == str(ff.parent)                    # 随包 ffmpeg 目录被前置
-    assert "C:\\existing" in parts                       # 原 PATH 保留
+    assert "PREEXISTING" in parts                        # 原 PATH 保留
 
 
 def test_add_bundled_ffmpeg_to_path_idempotent(monkeypatch, tmp_path):
@@ -268,7 +268,7 @@ def test_add_bundled_ffmpeg_to_path_idempotent(monkeypatch, tmp_path):
     ff.parent.mkdir(parents=True)
     ff.write_bytes(b"")
     monkeypatch.setattr(config, "ROOT", tmp_path)
-    monkeypatch.setenv("PATH", "C:\\existing")
+    monkeypatch.setenv("PATH", "PREEXISTING")    # 不含 os.pathsep，跨平台(Linux ':' / Windows ';')都安全
     tts_engine.add_bundled_ffmpeg_to_path()
     tts_engine.add_bundled_ffmpeg_to_path()              # 再调一次不应重复添加
     parts = os.environ["PATH"].split(os.pathsep)
