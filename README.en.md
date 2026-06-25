@@ -4,6 +4,8 @@
 
 [简体中文](README.md) | **English**
 
+> 365 Open Source Plan #018 · a local, multilingual, dead-simple dubbing / voice-cloning tool built on Qwen3-TTS
+
 ## Overview
 
 **EasyVoice** is a local, **multilingual**, dead-simple dubbing / voice-cloning tool built on [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) (Chinese-first UI, works out of the box):
@@ -137,3 +139,11 @@ It produces `dist/EasyVoice-vX.Y[-cpu]/` and a same-named `.zip`. The full bundl
 - Qwen3-TTS: https://github.com/QwenLM/Qwen3-TTS
 - ModelScope: https://modelscope.cn
 - Gradio: https://www.gradio.app
+
+---
+
+## About the 365 Open Source Plan
+
+This is project #18 of the [365 Open Source Plan](https://github.com/rockbenben/365opensource).
+
+One person + AI, 300+ open-source projects in a year. [Submit your idea →](https://my.feishu.cn/share/base/form/shrcnI6y7rrmlSjbzkYXh6sjmzb)
