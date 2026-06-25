@@ -111,11 +111,9 @@ def _raw_synthesize(text, lang, ref_audio_path, device, model_id,
         temperature=temperature, top_p=top_p, top_k=top_k,
         repetition_penalty=repetition_penalty, max_new_tokens=max_new_tokens,
     )
-    if ref_text and str(ref_text).strip():
-        # ICL 高保真模式：提供参考音频的文字稿（SPIKE §5a）
-        kwargs.update(x_vector_only_mode=False, ref_text=str(ref_text).strip())
-    else:
-        kwargs.update(x_vector_only_mode=True)
+    # 始终用 x-vector 克隆模式。ICL(x_vector_only_mode=False + ref_text) 未经验证，
+    # 实测会把参考文字稿诵进输出(+ref_text 时长)，已移除该路径；ref_text 参数保留但忽略。
+    kwargs.update(x_vector_only_mode=True)
     wavs, sr = model.generate_voice_clone(**kwargs)
     return wavs, sr
 
@@ -204,6 +202,17 @@ def _split_text(text: str, max_chars: int = _SPLIT_THRESHOLD) -> list:
     return chunks or [text]
 
 
+def _trim_silence(audio, sr, thresh=0.01, pad_ms=80):
+    """去掉首尾异常长的静音(qwen-tts 偶发)；保留 pad_ms 余量，避免切到气口/弱音。"""
+    if audio is None or audio.size == 0:
+        return audio
+    idx = np.nonzero(np.abs(audio) > thresh)[0]
+    if idx.size == 0:
+        return audio[:int(sr * 0.1)]            # 整段都是静音 → 留 0.1s 占位
+    pad = int(sr * pad_ms / 1000)
+    return audio[max(0, idx[0] - pad): min(audio.size, idx[-1] + 1 + pad)]
+
+
 def synthesize(text, lang, ref_audio_path,
                temperature=0.9, top_p=0.9, speed=1.0,
                top_k=50, repetition_penalty=1.0, max_new_tokens=2048,
@@ -223,7 +232,7 @@ def synthesize(text, lang, ref_audio_path,
                                    temperature=temperature, top_p=top_p, top_k=top_k,
                                    repetition_penalty=repetition_penalty,
                                    max_new_tokens=max_new_tokens, ref_text=ref_text)
-        segs.append(np.asarray(wavs[0], dtype=np.float32))
+        segs.append(_trim_silence(np.asarray(wavs[0], dtype=np.float32), sr))   # 去首尾异常静音
         done_chars += len(ch)
         if progress_cb:
             progress_cb(done_chars, total_chars)
@@ -263,8 +272,17 @@ def _parse_ts(s: str) -> float:
     return int(h) * 3600 + int(m) * 60 + int(sec) + int((ms + "000")[:3]) / 1000.0
 
 
+_MAX_TIMELINE_SEC = 6 * 3600   # 时间轴上限(6h)：挡住异常/恶意时间戳(如 99:00:00)导致的超大内存分配
+
+
 def parse_subtitles(content: str) -> list:
     """解析 SRT / VTT / LRC → [{'start':秒,'end':秒,'text':str}]，按开始时间排序。"""
+    return parse_subtitles_ex(content)[0]
+
+
+def parse_subtitles_ex(content: str):
+    """同 parse_subtitles，但额外返回因超出时间轴上限(_MAX_TIMELINE_SEC)被丢弃的条数，
+    供 UI 提示，避免超长字幕被静默截断。返回 (cues, dropped)。"""
     content = (content or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     cues = []
     if "-->" in content:                                   # SRT / VTT
@@ -294,8 +312,11 @@ def parse_subtitles(content: str) -> list:
             end = raw[i + 1][0] if i + 1 < len(raw) else t + 4.0
             if txt:
                 cues.append({"start": t, "end": end, "text": txt})
-    cues.sort(key=lambda c: c["start"])
-    return cues
+    # 丢弃开始时间超出合理上限的字幕(异常/恶意时间戳)，否则时间轴缓冲会被撑到几十 GB
+    kept = [c for c in cues if 0 <= c["start"] < _MAX_TIMELINE_SEC]
+    dropped = len(cues) - len(kept)
+    kept.sort(key=lambda c: c["start"])
+    return kept, dropped
 
 
 def _atempo_np(audio, sr, ratio):
@@ -414,6 +435,7 @@ def synthesize_subtitles(cues, lang, ref_audio_path,
             progress_cb(min(g + _SUB_GROUP, len(texts)), len(texts))
     placed, new_cues = [], []
     for c, audio in zip(valid, audios):
+        audio = _trim_silence(audio, sr)                   # 同单段合成：去 qwen-tts 偶发首尾异常静音
         slot = max(0.0, float(c["end"]) - float(c["start"]))
         dur = len(audio) / sr
         if slot > 0 and dur > slot:                        # 超时 → 限速压缩贴轴

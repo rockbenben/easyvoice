@@ -135,6 +135,17 @@ def test_parse_subtitles_srt_vtt_lrc():
     assert len(lrc) == 2 and lrc[0]["start"] == 1.0 and lrc[0]["end"] == 3.5 and lrc[1]["start"] == 3.5
 
 
+def test_parse_subtitles_drops_absurd_timestamps():
+    # 异常/恶意时间戳(如 99:00:00)若保留，时间轴缓冲会被撑到几十 GB → MemoryError
+    srt = ("1\n99:00:00,000 --> 99:00:05,000\n你好\n\n"
+           "2\n00:00:01,000 --> 00:00:02,000\n世界\n")
+    cues = te.parse_subtitles(srt)
+    starts = [c["start"] for c in cues]
+    assert 1.0 in starts                         # 正常字幕保留
+    assert 356400.0 not in starts                # 99h 的异常时间戳被丢弃
+    assert all(0 <= s < 6 * 3600 for s in starts)
+
+
 def test_synthesize_subtitles_assembles_timeline(tmp_path, monkeypatch):
     monkeypatch.setattr(te.config, "OUTPUTS_DIR", tmp_path)
     monkeypatch.setattr(te, "_cuda_available", lambda: False)
@@ -151,6 +162,38 @@ def test_synthesize_subtitles_assembles_timeline(tmp_path, monkeypatch):
     import os
     assert abs(sf.info(wav).duration - 2.1) < 0.05    # 第二句 2.0s 开始 + 0.1s = 2.1s
     assert os.path.exists(srt) and "-->" in open(srt, encoding="utf-8").read()
+
+
+def test_parse_subtitles_ex_reports_dropped_count():
+    # 超 6h 上限的条数要回报，供 UI 提示，避免长字幕被静默截断
+    srt = ("1\n99:00:00,000 --> 99:00:05,000\n你好\n\n"
+           "2\n00:00:01,000 --> 00:00:02,000\n世界\n")
+    cues, dropped = te.parse_subtitles_ex(srt)
+    assert dropped == 1 and len(cues) == 1 and cues[0]["text"] == "世界"
+    cues2, dropped2 = te.parse_subtitles_ex("1\n00:00:01,000 --> 00:00:02,000\nA\n")
+    assert dropped2 == 0 and len(cues2) == 1
+
+
+def test_synthesize_subtitles_trims_leading_silence(tmp_path, monkeypatch):
+    """字幕路径也要去 qwen-tts 偶发首尾静音：否则前导静音把语音起点推后 → 错位且误触发限速压缩。"""
+    monkeypatch.setattr(te.config, "OUTPUTS_DIR", tmp_path)
+    monkeypatch.setattr(te, "_cuda_available", lambda: False)
+    monkeypatch.setattr(te, "has_17b_downloaded", lambda: False)
+    sr = 24000
+
+    class _Fake:
+        def generate_voice_clone(self, text, **k):         # 每条：1s 前导静音 + 0.5s 有声
+            seg = np.concatenate([np.zeros(sr, np.float32),
+                                  np.full(int(sr * 0.5), 0.5, np.float32)])
+            return [seg for _ in text], sr
+
+    monkeypatch.setattr(te, "_load", lambda mid, dev: _Fake())
+    wav, _srt = te.synthesize_subtitles([{"start": 0.0, "end": 5.0, "text": "a"}],
+                                        "chinese", "ref.wav")
+    import soundfile as sf
+    audio, _ = sf.read(wav, dtype="float32")
+    first = int(np.nonzero(np.abs(audio) > 0.01)[0][0]) / sr
+    assert first < 0.2                 # 起点≈0(已去 1s 前导静音)；未修剪则会在 ~1.0s
 
 
 def test_cues_to_srt_format():

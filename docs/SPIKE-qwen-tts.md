@@ -207,7 +207,7 @@ wavs, sr = model.generate_voice_clone(
 | `generate_voice_clone((np,sr), x_vector_only=True)` | 成功 |
 | `create_voice_clone_prompt` | 成功，返回 `List[VoiceClonePromptItem]` |
 | `generate_voice_design`（Base 模型） | 失败（预期）：Base 不支持 |
-| ICL 模式（`x_vector_only=False` + `ref_text`） | **未实测**（需真实语音+对应转录文本） |
+| ICL 模式（`x_vector_only=False` + `ref_text`） | 后实测：会把 `ref_text` 诵进输出（+ref_text 时长），**生产已移除**该路径，统一用 `x_vector_only=True` |
 | `generate_custom_voice` | **未实测**（Base 无内置 speaker） |
 
 ---
