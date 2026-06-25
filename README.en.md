@@ -9,7 +9,8 @@
 **EasyVoice** is a local, **multilingual**, dead-simple dubbing / voice-cloning tool built on [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) (Chinese-first UI, works out of the box):
 
 - **3-second voice cloning** — upload or record ~3 seconds of reference audio to clone a voice for any text / subtitle dubbing.
-- **Multilingual** — 10 languages: Chinese, English, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian.
+- **Multilingual** — 10 languages: Chinese, English, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian. Auto-detect by default, or pick manually.
+- **Remembers your settings** — language / voice / style / speed etc. are saved and restored on next launch.
 - **Subtitle dubbing** — upload subtitles (SRT / VTT / LRC) and generate one continuous, timeline-aligned voice-over, with the aligned subtitles exported back.
 - **Runs locally** — fully local inference, nothing uploaded to the cloud.
 - **GPU-adaptive** — uses CUDA automatically when a GPU is present, falls back to CPU otherwise.
@@ -26,8 +27,8 @@ Grab a bundle from **[Releases](../../releases/latest)** — two options:
 | **Full bundle** (GPU/CPU auto) | ~4.6 GB (3 volumes) | NVIDIA GPU / max speed | bundled |
 | **CPU lite bundle** | **~0.5 GB (single file)** | no GPU / small download | downloaded in-app on first launch (~1.8 GB) |
 
-- **Full bundle:** download `EasyVoice-v1.0.1.zip.01/.02/.03` + `merge-and-extract.bat` into one folder, double-click the bat to merge & extract.
-- **CPU lite bundle:** download the single `EasyVoice-v1.0.1-cpu.zip` and unzip. ⚠️ **CPU generation is slow**: ~20–40 s per sentence (machine-dependent), minutes for long paragraphs — best for short clips/preview. For GPU speed, use the full bundle.
+- **Full bundle:** download `EasyVoice-v1.0.2.zip.01/.02/.03` + `merge-and-extract.bat` into one folder, double-click the bat to merge & extract.
+- **CPU lite bundle:** download the single `EasyVoice-v1.0.2-cpu.zip` and unzip. ⚠️ **CPU generation is slow**: ~20–40 s per sentence (machine-dependent), minutes for long paragraphs — best for short clips/preview. For GPU speed, use the full bundle.
 
 ---
 
@@ -44,9 +45,9 @@ Run `Start EasyVoice.bat` in the folder. The first launch takes ~30s (model load
 ### 3. Use it in the browser
 A browser opens automatically at `http://127.0.0.1:7860`, with four tabs:
 
-- **Dubbing** — type text, pick a language and reference voice, click generate
+- **Dubbing** — type text, pick a language (Auto by default) and reference voice, click generate
 - **Subtitle dubbing** — upload a subtitle file, generate timeline-aligned audio
-- **My Voices** — manage reference voices (add / delete / rename / reorder)
+- **My Voices** — upload or record reference voices and manage them (add / delete / rename / reorder / preview)
 - **Presets** — save frequently used parameter presets (language + voice) for quick reuse
 
 ---
@@ -113,12 +114,13 @@ easyvoice/
 
 ## Building the bundle (optional)
 
-`build.ps1` packs the validated conda env into an unzip-and-double-click bundle (bundled Python runtime + model weights + ffmpeg):
+`build.ps1` packs the validated conda env into an unzip-and-double-click bundle:
 
 ```powershell
-pwsh -File build.ps1
+pwsh -File build.ps1                 # Full bundle: GPU/CPU auto, model bundled (~4.6 GB)
+pwsh -File build.ps1 -Variant cpu    # CPU lite: no CUDA, no model (~0.5 GB; model downloaded in-app on first launch)
 ```
-It produces `dist/EasyVoice-vX.Y/` and a same-named `.zip`. Note the bundle is several GB — above GitHub's 2 GB per-release-asset limit — so split it into volumes or host it externally.
+It produces `dist/EasyVoice-vX.Y[-cpu]/` and a same-named `.zip`. The full bundle exceeds GitHub's 2 GB per-asset limit — split it into volumes (with `merge-and-extract.bat`) or host externally; the CPU lite bundle is a single file.
 
 ---
 
