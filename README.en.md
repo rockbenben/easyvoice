@@ -8,7 +8,8 @@
 
 **EasyVoice** is a local, **multilingual**, dead-simple dubbing / voice-cloning tool built on [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) (Chinese-first UI, works out of the box):
 
-- **Multilingual TTS / cloning** — 10 languages: Chinese, English, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian. Clone a voice from just ~3 seconds of reference audio.
+- **3-second voice cloning** — upload or record ~3 seconds of reference audio to clone a voice for any text / subtitle dubbing.
+- **Multilingual** — 10 languages: Chinese, English, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian.
 - **Subtitle dubbing** — upload subtitles (SRT / VTT / LRC) and generate one continuous, timeline-aligned voice-over, with the aligned subtitles exported back.
 - **Runs locally** — fully local inference, nothing uploaded to the cloud.
 - **GPU-adaptive** — uses CUDA automatically when a GPU is present, falls back to CPU otherwise.
