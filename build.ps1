@@ -30,7 +30,7 @@
 [CmdletBinding()]
 param(
   [string]$EnvName   = "easyvoice",
-  [string]$Version   = "v1.0",
+  [string]$Version   = "v1.0.1",
   [string]$CondaRoot = "$env:USERPROFILE\miniconda3",
   [string]$ModelId   = "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
   [ValidateSet("gpu","cpu")][string]$Variant = "gpu"

@@ -26,8 +26,8 @@ Grab a bundle from **[Releases](../../releases/latest)** — two options:
 | **Full bundle** (GPU/CPU auto) | ~4.6 GB (3 volumes) | NVIDIA GPU / max speed | bundled |
 | **CPU lite bundle** | **~0.5 GB (single file)** | no GPU / small download | downloaded in-app on first launch (~1.8 GB) |
 
-- **Full bundle:** download `EasyVoice-v1.0.zip.01/.02/.03` + `merge-and-extract.bat` into one folder, double-click the bat to merge & extract.
-- **CPU lite bundle:** download the single `EasyVoice-v1.0-cpu.zip` and unzip. ⚠️ **CPU generation is slow**: ~20–40 s per sentence (machine-dependent), minutes for long paragraphs — best for short clips/preview. For GPU speed, use the full bundle.
+- **Full bundle:** download `EasyVoice-v1.0.1.zip.01/.02/.03` + `merge-and-extract.bat` into one folder, double-click the bat to merge & extract.
+- **CPU lite bundle:** download the single `EasyVoice-v1.0.1-cpu.zip` and unzip. ⚠️ **CPU generation is slow**: ~20–40 s per sentence (machine-dependent), minutes for long paragraphs — best for short clips/preview. For GPU speed, use the full bundle.
 
 ---
 
