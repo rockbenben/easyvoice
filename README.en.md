@@ -13,9 +13,10 @@
 - **3-second voice cloning** — upload or record ~3 seconds of reference audio to clone a voice for any text / subtitle dubbing.
 - **Multilingual** — 10 languages: Chinese, English, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian. Auto-detect by default, or pick manually.
 - **Remembers your settings** — language / voice / style / speed etc. are saved and restored on next launch.
-- **Subtitle dubbing** — upload subtitles (SRT / VTT / LRC) and generate one continuous, timeline-aligned voice-over, with the aligned subtitles exported back.
+- **Subtitle dubbing (multi-speaker)** — upload subtitles (SRT / VTT / LRC); voices are auto-assigned per speaker, each line can be previewed / edited / re-rolled, generated timeline-aligned, and muxed straight into your video (dubbed video + aligned subtitles exported).
 - **Runs locally** — fully local inference, nothing uploaded to the cloud.
 - **GPU-adaptive** — uses CUDA automatically when a GPU is present, falls back to CPU otherwise.
+- **Quality switch (with an NVIDIA GPU)** — manually pick between **Fast 0.6B** and **High 1.7B** models (1.7B auto-downloads on first use); locked to 0.6B without a GPU.
 - **Zero-setup** — end users unzip the all-in-one bundle and double-click to launch; developers can run from source.
 
 ---
@@ -29,8 +30,8 @@ Grab a bundle from **[Releases](../../releases/latest)** — two options:
 | **Full bundle** (GPU/CPU auto) | ~4.6 GB (3 volumes) | NVIDIA GPU / max speed | bundled |
 | **CPU lite bundle** | **~0.5 GB (single file)** | no GPU / small download | downloaded in-app on first launch (~1.8 GB) |
 
-- **Full bundle:** download `EasyVoice-v1.0.2.zip.01/.02/.03` + `merge-and-extract.bat` into one folder, double-click the bat to merge & extract.
-- **CPU lite bundle:** download the single `EasyVoice-v1.0.2-cpu.zip` and unzip. ⚠️ **CPU generation is slow**: ~20–40 s per sentence (machine-dependent), minutes for long paragraphs — best for short clips/preview. For GPU speed, use the full bundle.
+- **Full bundle:** download `EasyVoice-v1.1.0.zip.01/.02/.03` + `merge-and-extract.bat` into one folder, double-click the bat to merge & extract.
+- **CPU lite bundle:** download the single `EasyVoice-v1.1.0-cpu.zip` and unzip. ⚠️ **CPU generation is slow**: ~20–40 s per sentence (machine-dependent), minutes for long paragraphs — best for short clips/preview. For GPU speed, use the full bundle.
 
 ---
 
@@ -48,7 +49,7 @@ Run `Start EasyVoice.bat` in the folder. The first launch takes ~30s (model load
 A browser opens automatically at `http://127.0.0.1:7860`, with four tabs:
 
 - **Dubbing** — type text, pick a language (Auto by default) and reference voice, click generate
-- **Subtitle dubbing** — upload a subtitle file, generate timeline-aligned audio
+- **Subtitle dubbing** — upload subtitles → assign a voice per speaker → fix lines (preview / edit / re-roll) → assemble & export (optionally muxed into your video)
 - **My Voices** — upload or record reference voices and manage them (add / delete / rename / reorder / preview)
 - **Presets** — save frequently used parameter presets (language + voice) for quick reuse
 
@@ -100,7 +101,9 @@ easyvoice/
 │   ├── voice_library.py  # Voice library (CRUD + reorder)
 │   ├── presets.py        # Preset management (save / load parameter sets)
 │   ├── seed.py           # First-run sample voices / presets
-│   ├── tts_engine.py     # TTS engine (load, synthesize, chunking, subtitle align, speed)
+│   ├── tts_engine.py     # TTS engine (load, synthesize, chunking, subtitle align, speed, model select)
+│   ├── dubbing_project.py# Subtitle-dubbing project state (speaker detect / per-cue gen·reroll / assemble)
+│   ├── video_mux.py      # Mux dubbed audio into video (ffmpeg)
 │   └── ui.py             # Gradio UI (four tabs)
 ├── app_main.py           # Entry point
 ├── build.ps1             # Bundle builder (conda-pack runtime + model + ffmpeg)
@@ -123,6 +126,17 @@ pwsh -File build.ps1                 # Full bundle: GPU/CPU auto, model bundled 
 pwsh -File build.ps1 -Variant cpu    # CPU lite: no CUDA, no model (~0.5 GB; model downloaded in-app on first launch)
 ```
 It produces `dist/EasyVoice-vX.Y[-cpu]/` and a same-named `.zip`. The full bundle exceeds GitHub's 2 GB per-asset limit — split it into volumes (with `merge-and-extract.bat`) or host externally; the CPU lite bundle is a single file.
+
+---
+
+## Changelog
+
+The following fixes are in the source and will ship with the next bundle build (download bundles are still v1.1.0):
+
+- **Subtitle dubbing · replace-audio export** — the exported video now keeps its full length through the end. Previously, when the dub was shorter than the video (the last subtitle ends before the outro), trailing footage was silently truncated; it is now padded to the full video length.
+- **Subtitle dubbing · concurrency** — operations on the same subtitle project (parse / edit / re-roll / generate-all / export) now run serially, preventing project-state corruption and broken exports from concurrent clicks.
+- **Stability · GPU serialization** — generation across the Dubbing and Subtitle-dubbing tabs now runs serially, avoiding VRAM OOM or corrupted audio from simultaneous generation.
+- **Dubbing · deleted voice** — a friendly message is shown when the selected voice is deleted mid-generation, instead of a raw error.
 
 ---
 
