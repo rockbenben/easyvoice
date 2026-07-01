@@ -1,5 +1,6 @@
 import gradio as gr
 from app import config, i18n, voice_library, presets, tts_engine
+from app import dubbing_project as _dub, video_mux as _vmux
 
 # ── 视觉设计：青瓷暖声 (celadon · warm voice) ─────────────────────────────
 # PC 桌面工具：宽幅双栏布局；品牌色 = 青瓷玉绿(信任/沉静/本地私密)，
@@ -457,9 +458,22 @@ def _lang_choices():
     return opts
 
 
+def _model_choices(tb=None):
+    # 标签需 i18n；choice value 固定 '0.6b'/'1.7b'。relabel 会按 locale 刷新 choices。
+    tb = tb or i18n.load("zh-Hans")
+    return [(i18n.t(tb, "model.fast"), "0.6b"),
+            (i18n.t(tb, "model.quality"), "1.7b")]
+
+
+def do_model_hint(pref, request: gr.Request = None):
+    """选 1.7B 且本地没有 → 弹一次"首次需下载"提示。"""
+    if pref == "1.7b" and not tts_engine.has_17b_downloaded():
+        gr.Info(i18n.t(_req_tb(request), "model.dl_hint"))
+
+
 def do_generate(text, lang, voice_id, temperature=0.9, top_p=0.9, speed=1.0,
                 top_k=50, repetition_penalty=1.0, max_new_tokens=2048, seed=0,
-                request: gr.Request = None, progress=gr.Progress()):
+                model="auto", request: gr.Request = None, progress=gr.Progress()):
     if not text or not voice_id:
         raise gr.Error(i18n.t(_req_tb(request), "err.need_text_voice"))
     try:
@@ -475,11 +489,17 @@ def do_generate(text, lang, voice_id, temperature=0.9, top_p=0.9, speed=1.0,
         except Exception:
             pass
 
-    return tts_engine.synthesize(
-        text, lang, ref, temperature, top_p, speed,
-        top_k=int(top_k), repetition_penalty=repetition_penalty,
-        max_new_tokens=int(max_new_tokens), seed=int(seed or 0),
-        progress_cb=cb)
+    try:
+        return tts_engine.synthesize(
+            text, lang, ref, temperature, top_p, speed,
+            top_k=int(top_k), repetition_penalty=repetition_penalty,
+            max_new_tokens=int(max_new_tokens), seed=int(seed or 0),
+            model=model, progress_cb=cb)
+    except Exception:
+        import os
+        if not os.path.exists(ref):        # 生成途中所选音色被删 → 文件消失，给友好提示而非原始异常
+            raise gr.Error(i18n.t(tb, "err.voice_missing"))
+        raise                              # 其它真实错误原样冒泡，不掩盖
 
 
 def do_apply_style(style):
@@ -545,10 +565,13 @@ def do_save_preset(name, lang, voice_id, temperature, top_p, speed, pbump=0,
                    request: gr.Request = None):
     if not name or not name.strip():
         raise gr.Error(i18n.t(_req_tb(request), "err.need_preset_name"))
-    presets.save_preset(name, {
-        "lang": lang, "voice_id": voice_id,
-        "temperature": temperature, "top_p": top_p, "speed": speed,
-    })
+    try:
+        presets.save_preset(name, {
+            "lang": lang, "voice_id": voice_id,
+            "temperature": temperature, "top_p": top_p, "speed": speed,
+        })
+    except ValueError as e:
+        raise gr.Error(str(e))   # 命名冲突等 → 走标准错误弹窗，而非原始异常
     return gr.update(choices=presets.list_presets()), pbump + 1  # -> (配音方案下拉, 管理列表重渲染)
 
 
@@ -649,7 +672,7 @@ def _req_tb(request):
 
 def _run_generate(text, lang, voice_id, temperature=0.9, top_p=0.9, speed=1.0,
                   top_k=50, repetition_penalty=1.0, max_new_tokens=2048, seed=0,
-                  request: gr.Request = None, progress=gr.Progress()):
+                  model="auto", request: gr.Request = None, progress=gr.Progress()):
     """生成包装(生成器)：先禁用按钮显示"生成中" → 跑 do_generate → 无论成功或出错都复位按钮。
     出错时先 yield 复位、再把 gr.Error 冒泡给前端弹窗。不能用 .then(复位)：异常后 .then 不执行，
     会把按钮永久卡在"生成中"禁用态(只能刷页恢复)。"""
@@ -660,27 +683,127 @@ def _run_generate(text, lang, voice_id, temperature=0.9, top_p=0.9, speed=1.0,
     try:
         audio = do_generate(text, lang, voice_id, temperature, top_p, speed,
                             top_k, repetition_penalty, max_new_tokens, seed,
-                            request=request, progress=progress)
+                            model=model, request=request, progress=progress)
     except Exception:
         yield idle, gr.update()                # 出错也复位按钮
         raise                                   # 仍把错误冒泡 → 前端弹窗
     yield idle, audio
 
 
-def _run_subtitle_dub(file_path, voice_id, lang,
-                      request: gr.Request = None, progress=gr.Progress()):
-    """字幕配音包装(生成器)：同 _run_generate，出错也复位按钮，避免卡死在"生成中"。"""
+def _sub_table(project):
+    """工程态 → 状态表二维数组（# / 角色 / 文本 / 状态）。"""
+    if not project:
+        return []
+    return [[c["idx"] + 1, c["speaker"], c["text"], c["status"]] for c in project["cues"]]
+
+
+def do_sub_parse(file_path, lang, voice_id, request: gr.Request = None):
+    if not file_path:
+        raise gr.Error(i18n.t(_req_tb(request), "err.need_subtitle"))
+    content = open(file_path, encoding="utf-8", errors="ignore").read()
+    project = _dub.build_project(content, lang, voice_id)
+    if not project["cues"]:
+        raise gr.Error(i18n.t(_req_tb(request), "err.no_cues"))
+    return (project, gr.update(value=_sub_table(project)),
+            None,                                              # 重置选中行(避免对短字幕用旧 idx 触发 KeyError)
+            gr.update(value=""),                               # 清空编辑文本
+            gr.update(choices=list(project["speakers"].keys()), value=None),  # 重置角色下拉
+            None)                                              # 清空试听
+
+
+def do_sub_select(project, evt: gr.SelectData, request: gr.Request = None):
+    """点选状态表某行 → 载入编辑面板（文本 / 角色 / 试听）。"""
+    if not project:
+        return gr.update(), gr.update(), gr.update(), None
+    # v1: 表格行序 == cue["idx"]（v1 不支持删行/重排，故二者一致；若将来支持需改为显式行→idx 映射）
+    idx = evt.index[0] if evt and evt.index else 0
+    c = _dub._cue(project, idx)
+    speakers = list(project["speakers"].keys())
+    return (idx,
+            gr.update(value=c["text"]),
+            gr.update(choices=speakers, value=c["speaker"]),
+            c.get("audio_path"))
+
+
+def _role_change(project, speaker, voice_id):
+    _dub.set_speaker_voice(project, speaker, voice_id)
+    return project, gr.update(value=_sub_table(project))
+
+
+def do_sub_edit_text(project, idx, text, speaker, request: gr.Request = None):
+    """保存编辑面板的文本/角色改动（标脏，不立即重生）。"""
+    if project is None:
+        return project, gr.update()
+    if idx is None:
+        raise gr.Error(i18n.t(_req_tb(request), "sub.select_hint"))
+    _dub.set_cue_text(project, int(idx), text)
+    if speaker:
+        _dub.set_cue_speaker(project, int(idx), speaker)
+    return project, gr.update(value=_sub_table(project))
+
+
+def do_sub_reroll(project, idx, model_pref="auto", request: gr.Request = None):
+    """重录选中条（新随机种子），刷新试听与状态表。"""
+    tb = _req_tb(request)
+    if project is None:
+        raise gr.Error(i18n.t(tb, "err.no_project"))
+    if idx is None:
+        raise gr.Error(i18n.t(tb, "sub.select_hint"))
+    project.setdefault("params", {})["model"] = model_pref
+    _dub.reroll_cue(project, int(idx))
+    c = _dub._cue(project, int(idx))
+    return project, gr.update(value=_sub_table(project)), c.get("audio_path")
+
+
+def _run_sub_gen_all(project, model_pref="auto", request: gr.Request = None, progress=gr.Progress()):
+    """生成全部（生成器）：禁用→逐条生成报进度→复位；出错也复位。"""
     tb = _req_tb(request)
     busy = gr.update(value=i18n.t(tb, "btn.generating"), interactive=False)
-    idle = gr.update(value=i18n.t(tb, "sub.generate"), interactive=True)
-    yield busy, gr.update(), gr.update()
+    idle = gr.update(value=i18n.t(tb, "sub.gen_all"), interactive=True)
+    if project is None:
+        raise gr.Error(i18n.t(tb, "err.no_project"))
+    yield busy, gr.update(), project
     try:
-        audio, srt = do_subtitle_dub(file_path, voice_id, lang,
-                                     request=request, progress=progress)
+        def cb(done, total):
+            try:
+                progress(done / total if total else 0,
+                         desc=i18n.t(tb, "prog.cues").replace("{d}", str(done)).replace("{t}", str(total)))
+            except Exception:
+                pass
+        project.setdefault("params", {})["model"] = model_pref
+        _dub.generate_all(project, progress_cb=cb)
     except Exception:
-        yield idle, gr.update(), gr.update()    # 出错也复位按钮
+        yield idle, gr.update(), project
         raise
-    yield idle, audio, srt
+    yield idle, gr.update(value=_sub_table(project)), project
+
+
+def _run_sub_export(project, video_path, mux_mode, request: gr.Request = None,
+                    progress=gr.Progress()):
+    """合成导出（生成器）：拼时间轴→（有视频则）mux；出错也复位。"""
+    tb = _req_tb(request)
+    busy = gr.update(value=i18n.t(tb, "btn.generating"), interactive=False)
+    idle = gr.update(value=i18n.t(tb, "sub.export"), interactive=True)
+    if project is None:
+        raise gr.Error(i18n.t(tb, "err.no_project"))
+    yield busy, gr.update(), gr.update(), gr.update()
+    try:
+        if not any(c.get("status") == "ok" for c in project["cues"]):
+            raise gr.Error(i18n.t(tb, "err.nothing_generated"))   # 友好提示，替代 assemble 抛的原始 ValueError
+        wav, srt = _dub.assemble(project)
+        skipped = sum(1 for c in project["cues"] if c.get("status") != "ok")
+        if skipped:
+            gr.Info(i18n.t(tb, "sub.export_skipped").replace("{n}", str(skipped)))
+        video_out = None
+        if video_path:
+            keep = (mux_mode == "keep")
+            video_out = _vmux.mux(video_path, wav, keep_original=keep)
+            if video_out is None:                       # ffmpeg 缺失/失败 → 仍给音频字幕，但要明示
+                gr.Warning(i18n.t(tb, "sub.mux_failed"))
+    except Exception:
+        yield idle, gr.update(), gr.update(), gr.update()
+        raise
+    yield idle, wav, srt, (video_out or gr.update(value=None))
 
 
 def do_subtitle_preview(file_path, request: gr.Request = None):
@@ -701,33 +824,11 @@ def do_subtitle_preview(file_path, request: gr.Request = None):
     return msg
 
 
-def do_subtitle_dub(file_path, voice_id, lang, request: gr.Request = None, progress=gr.Progress()):
-    if not file_path:
-        raise gr.Error(i18n.t(_req_tb(request), "err.need_subtitle"))
-    try:
-        ref = voice_library.get_audio_path(voice_id)        # None/失效 → KeyError
-    except KeyError:
-        raise gr.Error(i18n.t(_req_tb(request), "err.voice_missing"))
-    content = open(file_path, encoding="utf-8", errors="ignore").read()
-    cues = tts_engine.parse_subtitles(content)
-    if not cues:
-        raise gr.Error(i18n.t(_req_tb(request), "err.no_cues"))
-    tb = _req_tb(request)
-
-    def cb(done, total):                                # 实时进度："已合成 X/Y 条"
-        try:
-            progress(done / total if total else 0,
-                     desc=i18n.t(tb, "prog.cues").replace("{d}", str(done)).replace("{t}", str(total)))
-        except Exception:
-            pass
-
-    return tts_engine.synthesize_subtitles(cues, lang, ref, progress_cb=cb)
-
-
 def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
     config.ensure_dirs()
     tb = i18n.load(lang)
     _first_voice = next((v["id"] for v in voice_library.list_voices()), None)
+    _default_model = "1.7b" if (tts_engine.is_gpu() and tts_engine.has_17b_downloaded()) else "0.6b"
     _preset_names = presets.list_presets()
     _chinese_default = "新闻播报（中文·稳定）"
     _default_preset = (_chinese_default if _chinese_default in _preset_names
@@ -757,6 +858,10 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                             )
                             speed = gr.Slider(0.5, 2.0, value=1.0, step=0.1,
                                               label=I18N("field.speed"), info=I18N("field.speed_info"))
+                            model_radio = gr.Radio(
+                                _model_choices(tb), value=_default_model,
+                                label=I18N("model.title"), elem_classes=["ev-style"],
+                                visible=tts_engine.is_gpu())
                             with gr.Accordion(I18N("adv.title"), open=False,
                                               elem_classes=["ev-acc"]) as accordion:
                                 adv_hint = gr.Markdown(I18N("adv.hint"),
@@ -794,8 +899,9 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 max_tokens.change(_loc_tok_estimate, max_tokens, tok_est, show_progress="hidden")
                 gen.click(_run_generate,                                    # 禁用→生成→复位(出错也复位)
                           [text_in, lang_dd, voice_dd, temperature, top_p, speed,
-                           top_k, rep_pen, max_tokens, seed_in],
+                           top_k, rep_pen, max_tokens, seed_in, model_radio],
                           [gen, audio_out])
+                model_radio.change(do_model_hint, model_radio, None, show_progress="hidden")
                 dub_preset.change(do_apply_preset, [dub_preset],
                                   [lang_dd, voice_dd, speed, temperature, top_p],
                                   show_progress="hidden")
@@ -920,32 +1026,88 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                 gr.Markdown(do_preset_summary(name, vloc),
                                             elem_classes=["ev-readout", "ev-prow-sum"])
                                 dl.click(lambda _n=name: _n, None, [_ppending])
-            # ── 字幕配音: 上传字幕 → 按时间轴生成 ─────────────────────────
+            # ── 字幕配音: 上传→角色配音→生成&挑错→合成导出 ─────────────────
             with gr.Tab(I18N("tab.subtitle")) as tab_subtitle:
                 sub_guide = gr.Markdown(I18N("sub.guide"), elem_classes=["ev-guide"])
+                _sub_proj = gr.State(None)        # 工程态(按会话)
+                _sub_sel = gr.State(None)         # 当前选中行 idx
                 with gr.Row(elem_classes=["ev-row"]):
                     with gr.Column(scale=2, min_width=320):
                         with gr.Group(elem_classes=["ev-card"]):
                             sub_file = gr.File(label=I18N("sub.file"), file_count="single",
                                                type="filepath",
                                                file_types=[".srt", ".vtt", ".lrc", ".txt"])
-                            sub_preview = gr.Markdown("", elem_classes=["ev-readout"])
-                            sub_voice = gr.Dropdown(_voice_choices(), label=I18N("field.voice"),
-                                                    info=I18N("field.voice_info"), value=_first_voice)
                             sub_lang = gr.Dropdown(_lang_choices(), label=I18N("field.lang"),
                                                    info=I18N("field.lang_info"), value="auto")
+                            sub_voice = gr.Dropdown(_voice_choices(), label=I18N("field.voice"),
+                                                    info=I18N("field.voice_info"),
+                                                    value=_first_voice)
+                            sub_model_radio = gr.Radio(
+                                _model_choices(tb), value=_default_model,
+                                label=I18N("model.title"), elem_classes=["ev-style"],
+                                visible=tts_engine.is_gpu())
+                            sub_parse = gr.Button(I18N("sub.parse"), variant="primary")
+                            sub_preview = gr.Markdown("", elem_classes=["ev-readout"])
+                            roles_eb = gr.Markdown(I18N("sub.roles_title"))
+                            @gr.render(inputs=[_sub_proj, _vloc])
+                            def _render_roles(project, vloc):
+                                if not project:
+                                    return
+                                for spk in project["speakers"].keys():
+                                    dd = gr.Dropdown(_voice_choices(),
+                                                     value=project["speakers"].get(spk),
+                                                     label=spk)
+                                    dd.change(lambda vid, p, _spk=spk: _role_change(p, _spk, vid),
+                                              [dd, _sub_proj], [_sub_proj, sub_table],
+                                              show_progress="hidden", concurrency_id="ev_sub_project")
                     with gr.Column(scale=3, min_width=360):
                         with gr.Group(elem_classes=["ev-card"]):
-                            sub_gen = gr.Button(I18N("sub.generate"), variant="primary",
+                            sub_table = gr.Dataframe(
+                                headers=["#", I18N("sub.col_speaker"),
+                                         I18N("sub.col_text"), I18N("sub.col_status")],
+                                datatype=["number", "str", "str", "str"],
+                                interactive=False, wrap=True, elem_classes=["ev-subtable"])
+                            sub_gen = gr.Button(I18N("sub.gen_all"), variant="primary",
                                                 elem_id="ev-subgen")
+                            with gr.Group(elem_classes=["ev-card"]):
+                                edit_eb = gr.Markdown(I18N("sub.edit_title"))
+                                edit_text = gr.Textbox(label=I18N("sub.edit_text"), lines=2)
+                                edit_speaker = gr.Dropdown([], label=I18N("sub.edit_speaker"),
+                                                           allow_custom_value=True)
+                                with gr.Row():
+                                    edit_apply = gr.Button(I18N("sub.edit_apply"))
+                                    edit_reroll = gr.Button(I18N("sub.reroll"))
+                                edit_audio = gr.Audio(label=I18N("sub.preview"),
+                                                      interactive=False, elem_classes=["ev-audio"])
+                            sub_video = gr.File(label=I18N("sub.video"), file_count="single",
+                                                type="filepath")
+                            sub_mux = gr.Radio(choices=[(I18N("sub.mux_replace"), "replace"),
+                                                        (I18N("sub.mux_keep"), "keep")],
+                                               value="replace", label=I18N("sub.mux_mode"),
+                                               elem_classes=["ev-style"])
+                            sub_export = gr.Button(I18N("sub.export"), variant="primary")
                             sub_audio = gr.Audio(label=I18N("field.result"), elem_classes=["ev-audio"])
                             sub_srt = gr.File(label=I18N("sub.srt"))
+                            sub_video_out = gr.Video(label=I18N("sub.video_out"))
                 sub_file.change(do_subtitle_preview, sub_file, sub_preview, show_progress="hidden")
                 tab_subtitle.select(lambda: gr.update(choices=_voice_choices()), None, sub_voice,
                                     show_progress="hidden")
-                sub_gen.click(_run_subtitle_dub,                            # 禁用→生成→复位(出错也复位)
-                              [sub_file, sub_voice, sub_lang],
-                              [sub_gen, sub_audio, sub_srt])
+                sub_parse.click(do_sub_parse, [sub_file, sub_lang, sub_voice],
+                                [_sub_proj, sub_table, _sub_sel, edit_text, edit_speaker, edit_audio],
+                                concurrency_id="ev_sub_project")
+                sub_table.select(do_sub_select, [_sub_proj],
+                                 [_sub_sel, edit_text, edit_speaker, edit_audio])
+                edit_apply.click(do_sub_edit_text,
+                                 [_sub_proj, _sub_sel, edit_text, edit_speaker],
+                                 [_sub_proj, sub_table], concurrency_id="ev_sub_project")
+                edit_reroll.click(do_sub_reroll, [_sub_proj, _sub_sel, sub_model_radio],
+                                  [_sub_proj, sub_table, edit_audio], concurrency_id="ev_sub_project")
+                sub_gen.click(_run_sub_gen_all, [_sub_proj, sub_model_radio],
+                              [sub_gen, sub_table, _sub_proj], concurrency_id="ev_sub_project")
+                sub_model_radio.change(do_model_hint, sub_model_radio, None, show_progress="hidden")
+                sub_export.click(_run_sub_export, [_sub_proj, sub_video, sub_mux],
+                                 [sub_export, sub_audio, sub_srt, sub_video_out],
+                                 concurrency_id="ev_sub_project")
         footer = gr.HTML(_footer_html(lang))
 
         # ── 界面语言：手动切换(?__lang=)或浏览器自动，在 load 时服务端整体重排 ──
@@ -953,12 +1115,14 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
         _relabel_targets = [
             hero, steps, eb_setup, eb_compose, eb_voadd, eb_vomng,
             tab_tts, tab_voices, tab_presets, tab_subtitle,
-            lang_dd, voice_dd, style_radio, speed, accordion, adv_hint, temperature, top_p,
+            lang_dd, voice_dd, style_radio, speed, model_radio, accordion, adv_hint, temperature, top_p,
             top_k, rep_pen, max_tokens, tok_est, seed_in,
             text_in, gen, audio_out, voice_hint,
             vname, vref, vref_play, vadd, manage_hint, _vloc,
             preset_guide, dub_preset, dub_pname, dub_save,
-            sub_guide, sub_file, sub_voice, sub_lang, sub_gen, sub_audio, sub_srt,
+            sub_guide, sub_file, sub_lang, sub_voice, sub_model_radio, sub_parse, roles_eb, sub_table,
+            sub_gen, edit_eb, edit_text, edit_speaker, edit_apply, edit_reroll, edit_audio,
+            sub_video, sub_mux, sub_export, sub_audio, sub_srt, sub_video_out,
             footer,
         ]
 
@@ -985,6 +1149,7 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 style_radio: gr.update(label=L("style.title"), info=L("style.info"),
                                        choices=_style_choices(t)),
                 speed: gr.update(label=L("field.speed"), info=L("field.speed_info")),
+                model_radio: gr.update(label=L("model.title"), choices=_model_choices(t)),
                 accordion: gr.update(label=L("adv.title")),
                 adv_hint: gr.update(value=L("adv.hint")),
                 temperature: gr.update(label=L("adv.temperature"), info=L("adv.temperature_info")),
@@ -1010,11 +1175,28 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 dub_save: gr.update(value=L("preset.save")),
                 sub_guide: gr.update(value=L("sub.guide")),
                 sub_file: gr.update(label=L("sub.file")),
-                sub_voice: gr.update(label=L("field.voice"), info=L("field.voice_info")),
                 sub_lang: gr.update(label=L("field.lang"), info=L("field.lang_info")),
-                sub_gen: gr.update(value=L("sub.generate")),
+                sub_voice: gr.update(label=L("field.voice"), info=L("field.voice_info")),
+                sub_model_radio: gr.update(label=L("model.title"), choices=_model_choices(t)),
+                sub_parse: gr.update(value=L("sub.parse")),
+                roles_eb: gr.update(value=L("sub.roles_title")),
+                sub_table: gr.update(headers=["#", L("sub.col_speaker"),
+                                              L("sub.col_text"), L("sub.col_status")]),
+                sub_gen: gr.update(value=L("sub.gen_all")),
+                edit_eb: gr.update(value=L("sub.edit_title")),
+                edit_text: gr.update(label=L("sub.edit_text")),
+                edit_speaker: gr.update(label=L("sub.edit_speaker")),
+                edit_apply: gr.update(value=L("sub.edit_apply")),
+                edit_reroll: gr.update(value=L("sub.reroll")),
+                edit_audio: gr.update(label=L("sub.preview")),
+                sub_video: gr.update(label=L("sub.video")),
+                sub_mux: gr.update(label=L("sub.mux_mode"),
+                                   choices=[(L("sub.mux_replace"), "replace"),
+                                            (L("sub.mux_keep"), "keep")]),
+                sub_export: gr.update(value=L("sub.export")),
                 sub_audio: gr.update(label=L("field.result")),
                 sub_srt: gr.update(label=L("sub.srt")),
+                sub_video_out: gr.update(label=L("sub.video_out")),
                 footer: gr.update(value=_footer_html(loc)),
             }
 
@@ -1022,8 +1204,8 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
         # 不持久化 temp/top_p：它们由 style 经 do_apply_style 派生(style_radio.change→温度/top_p)。
         # 若独立持久化，重载时恢复 style 会触发该链路，用风格固定值覆盖刚恢复的 temp/top_p，
         # 并经 .change 把固定值写回 localStorage —— 既丢手调值又污染存档。恢复 style 即可正确重算二者。
-        _PKEYS = ["lang", "voice", "style", "speed", "top_k", "rep_pen", "max_tokens", "seed"]
-        _persist = [lang_dd, voice_dd, style_radio, speed, top_k, rep_pen, max_tokens, seed_in]
+        _PKEYS = ["lang", "voice", "style", "speed", "top_k", "rep_pen", "max_tokens", "seed", "model"]
+        _persist = [lang_dd, voice_dd, style_radio, speed, top_k, rep_pen, max_tokens, seed_in, model_radio]
         _settings = gr.BrowserState({}, storage_key="ev_dub_settings")
 
         def _save_settings(*vals):
