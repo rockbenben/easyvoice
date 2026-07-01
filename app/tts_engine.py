@@ -72,8 +72,31 @@ def select_device_and_model(has_17b: bool) -> tuple:
     return ("cpu", config.MODEL_06B)
 
 
+def resolve_model_pref(pref):
+    """pref: 'auto' | '0.6b' | '1.7b' → (device, model_id)。
+    CPU 永远 0.6B(忽略 pref)；GPU: auto=有1.7B就用否则0.6B，显式档照选。
+    不在此下载——下载由 _ensure_local 懒触发。"""
+    if not _cuda_available():
+        return ("cpu", config.MODEL_06B)
+    if pref == "1.7b":
+        return ("cuda", config.MODEL_17B)
+    if pref == "0.6b":
+        return ("cuda", config.MODEL_06B)
+    return ("cuda", config.MODEL_17B if has_17b_downloaded() else config.MODEL_06B)
+
+
+def _ensure_local(model_id):
+    """选了 1.7B 但本地缺失 → ensure_model 拉取(控制台进度)。0.6B/已下载则 no-op。"""
+    if resolve_model_dir(model_id) == model_id:   # resolve_model_dir 不存在则原样返回 → 未本地
+        ensure_model(model_id)
+
+
 _MODEL_CACHE = {}
 _LOAD_LOCK = threading.Lock()
+# 串行化 GPU 前向：Gradio queue 只保证「同 concurrency_id」串行，配音 Tab 与字幕 Tab
+# 的生成事件 id 不同，可被同时调度，对同一缓存模型并发前向 → 显存翻倍 OOM / CUDA 竞争。
+# 各调用点按段/按条获取释放，避免并发前向；单次顺序生成无争用、无开销。
+_INFER_LOCK = threading.Lock()
 
 
 def _load(model_id: str, device: str):
@@ -114,7 +137,8 @@ def _raw_synthesize(text, lang, ref_audio_path, device, model_id,
     # 始终用 x-vector 克隆模式。ICL(x_vector_only_mode=False + ref_text) 未经验证，
     # 实测会把参考文字稿诵进输出(+ref_text 时长)，已移除该路径；ref_text 参数保留但忽略。
     kwargs.update(x_vector_only_mode=True)
-    wavs, sr = model.generate_voice_clone(**kwargs)
+    with _INFER_LOCK:                      # 见 _INFER_LOCK：串行化跨 Tab 并发前向
+        wavs, sr = model.generate_voice_clone(**kwargs)
     return wavs, sr
 
 
@@ -216,13 +240,17 @@ def _trim_silence(audio, sr, thresh=0.01, pad_ms=80):
 def synthesize(text, lang, ref_audio_path,
                temperature=0.9, top_p=0.9, speed=1.0,
                top_k=50, repetition_penalty=1.0, max_new_tokens=2048,
-               ref_text=None, seed=0, progress_cb=None) -> str:
+               ref_text=None, seed=0, model="auto", progress_cb=None) -> str:
     text = normalize_text(text, lang)
-    device, model_id = select_device_and_model(has_17b_downloaded())
+    device, model_id = resolve_model_pref(model)
+    if model_id == config.MODEL_17B:        # 仅 1.7B 需懒下载；0.6B 是常驻基座(启动已 ensure)，
+        _ensure_local(model_id)             # 0.6B 路径不触碰 ensure_model → 现有测试/CI 无下载风险
     if seed and int(seed) > 0:                          # 固定种子 → 同参数可复现
         import torch
         torch.manual_seed(int(seed))
     chunks = _split_text(text) if len(text) > _SPLIT_THRESHOLD else [text]
+    if not chunks:                       # 全空白/纯标点超长 → 退回单段，避免 concatenate([]) 崩溃
+        chunks = [text]
     total_chars = sum(len(c) for c in chunks) or 1
     done_chars, segs, sr = 0, [], 24000
     if progress_cb:
@@ -283,7 +311,7 @@ def parse_subtitles(content: str) -> list:
 def parse_subtitles_ex(content: str):
     """同 parse_subtitles，但额外返回因超出时间轴上限(_MAX_TIMELINE_SEC)被丢弃的条数，
     供 UI 提示，避免超长字幕被静默截断。返回 (cues, dropped)。"""
-    content = (content or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    content = (content or "").replace("\r\n", "\n").replace("\r", "\n").lstrip("﻿").strip()
     cues = []
     if "-->" in content:                                   # SRT / VTT
         for block in re.split(r"\n[ \t]*\n", content):
@@ -328,8 +356,8 @@ def _atempo_np(audio, sr, ratio):
     import tempfile
     d = tempfile.mkdtemp()
     tin, tout = os.path.join(d, "i.wav"), os.path.join(d, "o.wav")
-    sf.write(tin, audio, sr)
     try:
+        sf.write(tin, audio, sr)
         r = subprocess.run([_ffmpeg_exe(), "-y", "-i", tin, "-filter:a", f"atempo={ratio}", tout],
                            capture_output=True, timeout=60)
         if r.returncode == 0 and os.path.exists(tout):
@@ -357,12 +385,11 @@ def _cue_token_cap(text: str, user_max: int) -> int:
 
 
 def _fmt_srt_ts(sec: float) -> str:
-    sec = max(0.0, float(sec))
-    h, m, s = int(sec // 3600), int(sec % 3600 // 60), int(sec % 60)
-    ms = int(round((sec - int(sec)) * 1000))
-    if ms >= 1000:
-        s += 1
-        ms -= 1000
+    total_ms = int(round(max(0.0, float(sec)) * 1000))
+    h = total_ms // 3600000
+    m = (total_ms // 60000) % 60
+    s = (total_ms // 1000) % 60
+    ms = total_ms % 1000
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
@@ -377,74 +404,46 @@ def cues_to_srt(cues) -> str:
     return "\n".join(out)
 
 
-_SUB_GROUP = 6   # 字幕按小批生成：兼顾批量提速与"已合成 X 条"的进度反馈
-
-
-def _gen_cue_group(model, texts, lang, ref_audio_path, icl, rt,
-                   temperature, top_p, top_k, repetition_penalty, user_max):
-    """一小批字幕：优先一次批量生成；失败则逐条(每条按自身长度更紧封顶)。返回音频数组列表。"""
-    n = len(texts)
-    common = dict(non_streaming_mode=True, do_sample=True, temperature=temperature,
-                  top_p=top_p, top_k=top_k, repetition_penalty=repetition_penalty)
-    try:                                                   # 批量：本批一次生成
-        cap = max(_cue_token_cap(t, user_max) for t in texts)
-        kw = dict(text=texts, language=[lang] * n, ref_audio=[ref_audio_path] * n,
-                  max_new_tokens=cap, **common)
-        kw.update(x_vector_only_mode=[False] * n, ref_text=[rt] * n) if icl \
-            else kw.update(x_vector_only_mode=[True] * n)
-        wavs, _ = model.generate_voice_clone(**kw)
-        return [np.asarray(w, dtype=np.float32) for w in wavs]
-    except Exception:                                      # 回退：逐条(每条更紧封顶)
-        out = []
-        for t in texts:
-            kw = dict(text=t, language=lang, ref_audio=ref_audio_path,
-                      max_new_tokens=_cue_token_cap(t, user_max), **common)
-            kw.update(x_vector_only_mode=False, ref_text=rt) if icl \
-                else kw.update(x_vector_only_mode=True)
-            wavs, _ = model.generate_voice_clone(**kw)
-            out.append(np.asarray(wavs[0], dtype=np.float32))
-        return out
-
-
-def synthesize_subtitles(cues, lang, ref_audio_path,
-                         temperature=0.9, top_p=0.9, top_k=50,
-                         repetition_penalty=1.0, max_new_tokens=2048,
-                         ref_text=None, seed=0, max_speedup=1.5, progress_cb=None):
-    """逐条字幕用同一音色生成(按小批批量、失败回退逐条)；按文本长度封顶防跑飞，超时则限速
-    压缩，按开始时间拼到时间轴。返回 (wav 路径, 对齐后的 srt 路径)。"""
-    device, model_id = select_device_and_model(has_17b_downloaded())
-    if seed and int(seed) > 0:
+def synthesize_one(text, lang, ref_audio_path, params=None):
+    """单条合成原语：归一文本→按文本长度封顶 token→生成→去首尾异常静音。
+    「生成全部」与「单条重录」共用此函数，保证行为一致。返回 (audio, sr)。"""
+    params = params or {}
+    text = normalize_text(text, lang)
+    device, model_id = resolve_model_pref(params.get("model", "auto"))
+    if model_id == config.MODEL_17B:        # 仅 1.7B 懒下载；0.6B 路径不 ensure → 现有测试无下载风险
+        _ensure_local(model_id)
+    seed = int(params.get("seed", 0) or 0)
+    if seed > 0:                                   # 固定种子→可复现；0→自然变化(供重录出不同条)
         import torch
-        torch.manual_seed(int(seed))
-    valid = [c for c in cues if normalize_text(c.get("text", ""), lang).strip()]
-    if not valid:
-        raise ValueError("字幕没有可用内容")
-    texts = [normalize_text(c["text"], lang) for c in valid]
-    icl = bool(ref_text and str(ref_text).strip())
-    rt = str(ref_text).strip() if icl else None
+        torch.manual_seed(seed)
     model = _load(model_id, device)
-    sr = 24000
-    if progress_cb:
-        progress_cb(0, len(texts))                         # 进度：先报总条数
-    audios = []
-    for g in range(0, len(texts), _SUB_GROUP):             # 按小批生成，逐批报进度
-        audios.extend(_gen_cue_group(model, texts[g:g + _SUB_GROUP], lang, ref_audio_path,
-                                     icl, rt, temperature, top_p, top_k,
-                                     repetition_penalty, max_new_tokens))
-        if progress_cb:
-            progress_cb(min(g + _SUB_GROUP, len(texts)), len(texts))
+    cap = _cue_token_cap(text, int(params.get("max_new_tokens", 2048)))
+    with _INFER_LOCK:                      # 见 _INFER_LOCK：串行化跨 Tab 并发前向
+        wavs, sr = model.generate_voice_clone(
+            text=text, language=lang, ref_audio=ref_audio_path,
+            non_streaming_mode=True, do_sample=True,
+            temperature=params.get("temperature", 0.9), top_p=params.get("top_p", 0.9),
+            top_k=params.get("top_k", 50),
+            repetition_penalty=params.get("repetition_penalty", 1.0),
+            max_new_tokens=cap, x_vector_only_mode=True)
+    return _trim_silence(np.asarray(wavs[0], dtype=np.float32), sr), sr
+
+
+def assemble_timeline(items, max_speedup=1.5, sr=24000):
+    """把若干已生成(已 trim)的单条音频按 start 放到时间轴；超时长则限速压缩贴轴；
+    导出反映实际时长的对齐 SRT。items: [{'start','end','text','audio'}]。返回 (wav, srt)。"""
     placed, new_cues = [], []
-    for c, audio in zip(valid, audios):
-        audio = _trim_silence(audio, sr)                   # 同单段合成：去 qwen-tts 偶发首尾异常静音
+    for c in items:
+        audio = np.asarray(c["audio"], dtype=np.float32)
         slot = max(0.0, float(c["end"]) - float(c["start"]))
         dur = len(audio) / sr
-        if slot > 0 and dur > slot:                        # 超时 → 限速压缩贴轴
+        if slot > 0 and dur > slot:                    # 超时→保音高限速压缩
             audio = _atempo_np(audio, sr, min(max_speedup, dur / slot))
         placed.append((max(0, int(float(c["start"]) * sr)), audio))
         new_cues.append((float(c["start"]), len(audio) / sr, c["text"]))
-    total = max(s + len(a) for s, a in placed)
+    total = max((s + len(a) for s, a in placed), default=sr // 10)
     buf = np.zeros(total, dtype=np.float32)
-    for s, a in placed:                                    # 放到时间轴(重叠则后者覆盖)
+    for s, a in placed:                                # 重叠则后者覆盖
         buf[s:s + len(a)] = a
     config.OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     base = config.OUTPUTS_DIR / f"sub_{uuid.uuid4().hex[:8]}"
@@ -453,3 +452,27 @@ def synthesize_subtitles(cues, lang, ref_audio_path,
     with open(srt_path, "w", encoding="utf-8") as f:
         f.write(cues_to_srt(new_cues))
     return wav_path, srt_path
+
+
+def synthesize_subtitles(cues, lang, ref_audio_path,
+                         temperature=0.9, top_p=0.9, top_k=50,
+                         repetition_penalty=1.0, max_new_tokens=2048,
+                         ref_text=None, seed=0, max_speedup=1.5, progress_cb=None):
+    """逐条用同一音色生成(synthesize_one)再按时间轴拼装(assemble_timeline)。
+    返回 (wav 路径, 对齐后的 srt 路径)。向后兼容：签名与返回不变。"""
+    valid = [c for c in cues if normalize_text(c.get("text", ""), lang).strip()]
+    if not valid:
+        raise ValueError("字幕没有可用内容")
+    params = dict(temperature=temperature, top_p=top_p, top_k=top_k,
+                  repetition_penalty=repetition_penalty,
+                  max_new_tokens=max_new_tokens, seed=seed)
+    if progress_cb:
+        progress_cb(0, len(valid))
+    items = []
+    for i, c in enumerate(valid):
+        audio, _sr = synthesize_one(c["text"], lang, ref_audio_path, params)
+        items.append({"start": c["start"], "end": c["end"],
+                      "text": c["text"], "audio": audio})
+        if progress_cb:
+            progress_cb(i + 1, len(valid))
+    return assemble_timeline(items, max_speedup=max_speedup)

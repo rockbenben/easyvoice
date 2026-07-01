@@ -273,3 +273,182 @@ def test_add_bundled_ffmpeg_to_path_idempotent(monkeypatch, tmp_path):
     tts_engine.add_bundled_ffmpeg_to_path()              # 再调一次不应重复添加
     parts = os.environ["PATH"].split(os.pathsep)
     assert parts.count(str(ff.parent)) == 1
+
+
+def test_synthesize_one_trims_and_caps(monkeypatch):
+    from app import tts_engine as te
+    import numpy as np
+    monkeypatch.setattr(te, "_cuda_available", lambda: False)
+    monkeypatch.setattr(te, "has_17b_downloaded", lambda: False)
+    seen = {}
+
+    class _Fake:
+        def generate_voice_clone(self, text, max_new_tokens, **k):
+            seen["text"] = text
+            seen["cap"] = max_new_tokens
+            seg = np.concatenate([np.zeros(24000, np.float32),          # 1s 前导静音
+                                  np.full(12000, 0.5, np.float32)])     # 0.5s 有声
+            return [seg], 24000
+
+    monkeypatch.setattr(te, "_load", lambda mid, dev: _Fake())
+    audio, sr = te.synthesize_one("你好", "chinese", "ref.wav",
+                                  {"max_new_tokens": 99999})
+    assert sr == 24000
+    assert seen["text"] == "你好"                 # 单条字符串，非 list
+    assert seen["cap"] <= 99999 and seen["cap"] >= 80   # 按文本长度封顶
+    first = int(np.nonzero(np.abs(audio) > 0.01)[0][0]) / sr
+    assert first < 0.2                             # 前导静音已修剪
+
+
+def test_assemble_timeline_places_and_compresses(tmp_path, monkeypatch):
+    from app import tts_engine as te
+    import numpy as np, soundfile as sf
+    monkeypatch.setattr(te.config, "OUTPUTS_DIR", tmp_path)
+    items = [
+        {"start": 0.0, "end": 1.0, "text": "a", "audio": np.full(2400, 0.4, np.float32)},   # 0.1s
+        {"start": 2.0, "end": 3.0, "text": "b", "audio": np.full(2400, 0.4, np.float32)},
+    ]
+    wav, srt = te.assemble_timeline(items)
+    assert abs(sf.info(wav).duration - 2.1) < 0.05    # 第二条 2.0s 起 + 0.1s
+    body = open(srt, encoding="utf-8").read()
+    assert "-->" in body and "a" in body and "b" in body
+
+
+def test_resolve_model_pref_cpu_forces_06b(monkeypatch):
+    monkeypatch.setattr(te, "_cuda_available", lambda: False)
+    for pref in ("auto", "0.6b", "1.7b"):
+        assert te.resolve_model_pref(pref) == ("cpu", te.config.MODEL_06B)
+
+
+def test_resolve_model_pref_gpu_explicit_and_auto(monkeypatch):
+    monkeypatch.setattr(te, "_cuda_available", lambda: True)
+    monkeypatch.setattr(te, "has_17b_downloaded", lambda: False)
+    assert te.resolve_model_pref("0.6b") == ("cuda", te.config.MODEL_06B)
+    assert te.resolve_model_pref("1.7b") == ("cuda", te.config.MODEL_17B)
+    assert te.resolve_model_pref("auto") == ("cuda", te.config.MODEL_06B)   # 无 1.7B → 0.6B
+    monkeypatch.setattr(te, "has_17b_downloaded", lambda: True)
+    assert te.resolve_model_pref("auto") == ("cuda", te.config.MODEL_17B)   # 有 1.7B → 1.7B
+
+
+def test_ensure_local_downloads_when_absent(monkeypatch):
+    calls = []
+    monkeypatch.setattr(te, "resolve_model_dir", lambda mid: mid)            # 永远"未本地"
+    monkeypatch.setattr(te, "ensure_model", lambda mid: calls.append(mid))
+    te._ensure_local("X")
+    assert calls == ["X"]
+
+
+def test_ensure_local_skips_when_present(monkeypatch):
+    calls = []
+    monkeypatch.setattr(te, "resolve_model_dir", lambda mid: "/local/path")  # 已本地
+    monkeypatch.setattr(te, "ensure_model", lambda mid: calls.append(mid))
+    te._ensure_local("X")
+    assert calls == []
+
+
+def test_synthesize_routes_model_pref_to_17b(tmp_path, monkeypatch):
+    monkeypatch.setattr(te.config, "OUTPUTS_DIR", tmp_path)
+    monkeypatch.setattr(te, "_cuda_available", lambda: True)
+    monkeypatch.setattr(te, "has_17b_downloaded", lambda: False)
+    ensured = []
+    monkeypatch.setattr(te, "_ensure_local", lambda mid: ensured.append(mid))
+    seen = {}
+
+    def _mock_raw(text, lang, ref, device, model_id, **k):
+        seen["model_id"] = model_id
+        seen["device"] = device
+        return [np.zeros(2400, np.float32)], 24000
+
+    monkeypatch.setattr(te, "_raw_synthesize", _mock_raw)
+    te.synthesize("hi", "english", "ref.wav", model="1.7b")
+    assert seen["model_id"] == te.config.MODEL_17B and seen["device"] == "cuda"
+    assert ensured == [te.config.MODEL_17B]
+
+
+def test_synthesize_one_routes_model_pref(monkeypatch):
+    monkeypatch.setattr(te, "_cuda_available", lambda: True)
+    monkeypatch.setattr(te, "has_17b_downloaded", lambda: False)
+    monkeypatch.setattr(te, "_ensure_local", lambda mid: None)
+    seen = {}
+
+    class _Fake:
+        def generate_voice_clone(self, text, **k):
+            return [np.zeros(2400, np.float32)], 24000
+
+    def _mock_load(mid, dev):
+        seen["model_id"] = mid
+        return _Fake()
+
+    monkeypatch.setattr(te, "_load", _mock_load)
+    te.synthesize_one("hi", "english", "ref.wav", {"model": "1.7b"})
+    assert seen["model_id"] == te.config.MODEL_17B
+
+
+def test_atempo_np_returns_original_on_write_failure(monkeypatch):
+    sr = 24000
+    audio = np.full(sr, 0.4, np.float32)
+    def _boom(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(te.sf, "write", _boom)
+    out = te._atempo_np(audio, sr, 1.5)          # ratio 1.5 → would process
+    assert np.array_equal(out, audio)            # graceful: original returned, no raise
+
+
+def test_fmt_srt_ts_carries_to_minute():
+    assert te._fmt_srt_ts(119.9999) == "00:02:00,000"   # not "00:01:60,000"
+    assert te._fmt_srt_ts(1.5) == "00:00:01,500"
+    assert te._fmt_srt_ts(3661.25) == "01:01:01,250"
+
+
+def test_synthesize_handles_whitespace_over_threshold(tmp_path, monkeypatch):
+    monkeypatch.setattr(te.config, "OUTPUTS_DIR", tmp_path)
+    monkeypatch.setattr(te, "_cuda_available", lambda: False)
+    monkeypatch.setattr(te, "has_17b_downloaded", lambda: False)
+    monkeypatch.setattr(te, "_raw_synthesize",
+                        lambda *a, **k: ([np.zeros(2400, np.float32)], 24000))
+    out = te.synthesize(" " * 201, "chinese", "ref.wav")   # was a crash
+    assert out.endswith(".wav")
+
+
+def test_parse_subtitles_strips_bom_lrc():
+    cues = te.parse_subtitles("﻿[00:01.00]第一行\n[00:03.50]第二行\n")
+    assert len(cues) == 2 and cues[0]["text"] == "第一行"   # BOM 不再吞掉首行
+
+
+def test_parse_subtitles_bom_srt_unaffected():
+    c = te.parse_subtitles("﻿1\n00:00:01,000 --> 00:00:02,000\n你好\n")
+    assert len(c) == 1 and c[0]["text"] == "你好"
+
+def test_infer_lock_serializes_concurrent_forward(monkeypatch):
+    """跨 Tab 并发生成时，两条线程不得同时进入 model.generate_voice_clone。
+    用会检测重入的假模型：若锁失效，overlap 会被置位。"""
+    import threading, time
+
+    state = {"inside": 0, "overlap": False}
+    lock = threading.Lock()
+
+    class _FakeModel:
+        def generate_voice_clone(self, **kwargs):
+            with lock:
+                state["inside"] += 1
+                if state["inside"] > 1:
+                    state["overlap"] = True
+            time.sleep(0.05)                       # 拉长窗口，让真并发有机会重叠
+            with lock:
+                state["inside"] -= 1
+            return [np.zeros(2400, dtype=np.float32)], 24000
+
+    monkeypatch.setattr(te, "_load", lambda model_id, device: _FakeModel())
+    monkeypatch.setattr(te, "_cuda_available", lambda: False)
+    monkeypatch.setattr(te, "has_17b_downloaded", lambda: False)
+
+    def _worker():
+        te.synthesize_one("hi", "english", "ref.wav")
+
+    threads = [threading.Thread(target=_worker) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert state["overlap"] is False, "并发前向发生重叠 —— _INFER_LOCK 未生效"
