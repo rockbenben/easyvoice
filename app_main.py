@@ -43,13 +43,25 @@ def main(open_browser: bool = True) -> None:
     demo = ui.build_ui("zh-Hans")
     # 后台预热模型，避免首次生成时干等加载(~15-30s)
     threading.Thread(target=tts_engine.warmup, daemon=True).start()
-    demo.launch(server_name="127.0.0.1", server_port=7860, inbrowser=open_browser,
-                theme=ui.THEME, css=ui.CSS, head=ui.HEAD, i18n=ui.I18N,
-                favicon_path=ui.FAVICON,
-                # 生成的音频在 outputs/（不在 CWD/临时目录下时 Gradio 默认拒绝外发），
-                # 显式放行，否则播放/下载会报 InvalidPathError。
-                # 放行 outputs/(生成结果) 与 voices/(音色库试听)，否则 Gradio 拒绝外发本地文件
-                allowed_paths=[str(ui.config.OUTPUTS_DIR), str(ui.config.VOICES_DIR)])
+    _kw = dict(server_name="127.0.0.1", inbrowser=open_browser,
+               theme=ui.THEME, css=ui.CSS, head=ui.HEAD, i18n=ui.I18N,
+               favicon_path=ui.FAVICON,
+               # 生成的音频在 outputs/（不在 CWD/临时目录下时 Gradio 默认拒绝外发），
+               # 显式放行 outputs/(生成结果) 与 voices/(音色库试听)，否则播放/下载报 InvalidPathError。
+               allowed_paths=[str(ui.config.OUTPUTS_DIR), str(ui.config.VOICES_DIR)])
+    # 端口回退：7860 被占用、或落在 Windows 保留端口段(Hyper-V/WSL 动态保留，netstat 看不到)时，
+    # 依次尝试候选端口而不是直接崩。inbrowser 会打开实际绑定端口，Gradio 也会打印真实 URL。
+    _last = None
+    for _port in (7860, 7861, 8600, 9000, 5000):
+        try:
+            demo.launch(server_port=_port, **_kw)
+            return                                  # launch 阻塞守着服务；返回即已正常关闭
+        except OSError as _e:
+            _last = _e
+            print(f"端口 {_port} 不可用，尝试下一个… / Port {_port} unavailable, trying next…",
+                  flush=True)
+    raise RuntimeError("所有候选端口都不可用，请释放 7860 后重试。 "
+                       "No candidate port available; free port 7860 and retry.") from _last
 
 if __name__ == "__main__":
     main()
