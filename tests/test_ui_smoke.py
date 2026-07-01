@@ -188,7 +188,8 @@ def test_do_apply_preset_returns_five_values(monkeypatch, tmp_path):
         "speed": 0.95, "temperature": 0.8, "top_p": 0.9,
     })
     result = ui.do_apply_preset("有声书旁白")
-    assert result == ("chinese", "v1", 0.95, 0.8, 0.9)
+    # 末位是同步给 style 芯片的档位(由温度反推)：0.8 → natural
+    assert result == ("chinese", "v1", 0.95, 0.8, 0.9, "natural")
 
 def test_do_apply_preset_fallback_defaults(monkeypatch, tmp_path):
     from app import ui, presets, config
@@ -198,7 +199,19 @@ def test_do_apply_preset_fallback_defaults(monkeypatch, tmp_path):
         "lang": "english", "voice_id": "v2",
     })
     result = ui.do_apply_preset("old preset")
-    assert result == ("english", "v2", 1.0, 0.9, 0.9)
+    assert result == ("english", "v2", 1.0, 0.9, 0.9, "natural")   # 默认温度 0.9 → natural
+
+
+def test_do_apply_preset_syncs_style_chip(monkeypatch, tmp_path):
+    """套用预设须回传与温度一致的 style 档位，避免芯片与滑块脱节；覆盖 stable/lively 两端。"""
+    from app import ui, presets, config
+    monkeypatch.setattr(config, "PRESETS_DIR", tmp_path / "p")
+    monkeypatch.setattr(presets, "get_preset",
+                        lambda name: {"lang": "chinese", "voice_id": "v", "temperature": 0.5})
+    assert ui.do_apply_preset("稳定")[-1] == "stable"     # 0.5 → stable
+    monkeypatch.setattr(presets, "get_preset",
+                        lambda name: {"lang": "chinese", "voice_id": "v", "temperature": 1.2})
+    assert ui.do_apply_preset("活泼")[-1] == "lively"     # 1.2 → lively
 
 
 def test_do_preset_summary_returns_markdown(monkeypatch, tmp_path):

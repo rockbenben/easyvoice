@@ -584,12 +584,14 @@ def do_apply_preset(name, request: gr.Request = None):
     if not name:
         raise gr.Error(i18n.t(_req_tb(request), "err.need_preset"))
     p = presets.get_preset(name)
+    temp = p.get("temperature", 0.9)
     return (
         p.get("lang"),
         p.get("voice_id"),
         p.get("speed", 1.0),
-        p.get("temperature", 0.9),
+        temp,
         p.get("top_p", 0.9),
+        _temp_to_style_key(temp),   # 同步 style 芯片(否则指示与温度脱节)，并让持久化的 style 与预设温度对应
     )
 
 
@@ -903,7 +905,7 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                           [gen, audio_out])
                 model_radio.change(do_model_hint, model_radio, None, show_progress="hidden")
                 dub_preset.change(do_apply_preset, [dub_preset],
-                                  [lang_dd, voice_dd, speed, temperature, top_p],
+                                  [lang_dd, voice_dd, speed, temperature, top_p, style_radio],
                                   show_progress="hidden")
                 dub_save.click(do_save_preset,
                                [dub_pname, lang_dd, voice_dd, temperature, top_p, speed, _pbump],
