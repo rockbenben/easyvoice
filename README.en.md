@@ -133,6 +133,7 @@ It produces `dist/EasyVoice-vX.Y[-cpu]/` and a same-named `.zip`. The full bundl
 
 The following fixes are in the source and will ship with the next bundle build (download bundles are still v1.1.0):
 
+- **Dubbing · preset & style sync** — applying a preset now updates the style chip to match the preset's temperature (no longer diverging from the sliders), and that style is persisted, so the preset's temperature / top_p are reproduced after a reload.
 - **Subtitle dubbing · speaker detection** — tightened the leading `Name:` prefix rule so multi-word phrases and pure-digit times (e.g. `12:30`) are no longer mistaken for a speaker and dropped from the dub; added a *Subtitles have speaker prefixes* toggle to disable splitting entirely for plain subtitles that contain colons.
 - **Subtitle dubbing · replace-audio export** — the exported video now keeps its full length through the end. Previously, when the dub was shorter than the video (the last subtitle ends before the outro), trailing footage was silently truncated; it is now padded to the full video length.
 - **Subtitle dubbing · concurrency** — operations on the same subtitle project (parse / edit / re-roll / generate-all / export) now run serially, preventing project-state corruption and broken exports from concurrent clicks.
