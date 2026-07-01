@@ -57,7 +57,7 @@ Gradio `demo.queue()` 默认 `default_concurrency_limit=1`：**同 `concurrency_
 配音常短于视频（末句字幕多在片尾前）。替换原声分支用 `-af apad` 把配音补静音到无限长，再由 `-shortest` 收到视频长度 → 输出恒等于视频时长（短则补静音到片尾、长则按视频截）。保留原声分支由原声轨 `amix=duration=longest` 锚定长度。ffmpeg 缺失/失败 → `mux` 返回 `None`，UI 降级为只给「音频 + 字幕」并 `gr.Warning`。
 
 ### 4.5 参数持久化 ↔ 风格
-配音设置存 `gr.BrowserState`（浏览器 localStorage）。**不持久化 temperature/top_p**：它们由「风格」经 `do_apply_style` 派生；只持久化风格，重载时恢复风格→重算二者（避免独立持久化引发的覆盖循环）。套用预设时同步风格芯片（由温度反推档位），使芯片/滑块/重载三者一致。
+配音设置——语言 / 音色 / 风格 / 语速 / top_k / 重复惩罚 / 最大长度 / 种子 / 模型——存 `gr.BrowserState`（浏览器 localStorage）。**唯独不持久化 temperature/top_p**：它们由「风格」经 `do_apply_style` 派生，只需持久化风格，重载时恢复风格→重算二者（避免独立持久化引发的覆盖循环）。套用预设时同步风格芯片（由温度反推档位），使芯片/滑块/重载三者一致。
 
 ### 4.6 界面语言
 `gr.I18n` 按浏览器语言自动本地化；运行时无法改 locale，故 `demo.load` 时用服务端 `_relabel` 确定性重排全部组件（含 Tab 标签、下拉 choices）。手动切换经 `?__lang=` + localStorage。
