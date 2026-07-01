@@ -397,6 +397,21 @@ def test_run_sub_export_flags_non_ok_cues(tmp_path, monkeypatch):
     assert len(infos) == 1                  # gr.Info 提示了跳过条数
 
 
+def test_do_sub_parse_threads_detect_speakers(monkeypatch, tmp_path):
+    """关闭「字幕含说话人前缀」→ 含冒号正文不被误拆，全部归到单一默认角色。"""
+    from app import ui, dubbing_project as dp
+    monkeypatch.setattr(dp.config, "OUTPUTS_DIR", tmp_path)
+    f = tmp_path / "c.srt"
+    f.write_text("1\n00:00:01,000 --> 00:00:02,000\nMeeting at 12:30 PM\n", encoding="utf-8")
+    out = ui.do_sub_parse(str(f), "english", "v0", False)   # detect_speakers=False
+    project = out[0]
+    assert list(project["speakers"].keys()) == [dp.DEFAULT_SPEAKER]
+    assert project["cues"][0]["text"] == "Meeting at 12:30 PM"   # 正文完整
+    # 默认(勾选)时含时间冒号也不再吞字(收紧后的规则)
+    out_on = ui.do_sub_parse(str(f), "english", "v0", True)
+    assert out_on[0]["cues"][0]["text"] == "Meeting at 12:30 PM"
+
+
 def test_do_sub_parse_resets_selection(monkeypatch, tmp_path):
     from app import ui, dubbing_project as dp
     monkeypatch.setattr(dp.config, "OUTPUTS_DIR", tmp_path)

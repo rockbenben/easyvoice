@@ -5,25 +5,33 @@ from app import tts_engine
 import soundfile as sf
 from app import config, voice_library
 
-# 行首「名字：」/「Name:」前缀 → 角色；名字不含冒号、≤20 字，避免把句中冒号误判为说话人
-SPEAKER_RE = re.compile(r"^\s*([^\s:：][^:：]{0,20})[:：]\s*(.+)$")
+# 行首「名字：」/「Name:」前缀 → 角色。名字须是单个词(不含空白/冒号)、≤20 字、且非纯数字，
+# 避免把普通字幕里的冒号误判为说话人：多词短语("Meeting at 12")因含空格不匹配、
+# 时间("12:30")因名字是纯数字被排除，正文不再被吞掉。
+SPEAKER_RE = re.compile(r"^\s*([^\s:：]{1,20})[:：]\s*(.+)$")
 DEFAULT_SPEAKER = "默认"
 
 
 def split_speaker(text):
-    """提取行首说话人前缀。命中返回 (角色, 去前缀文本)；否则 (None, 原文)。"""
+    """提取行首说话人前缀。命中返回 (角色, 去前缀文本)；否则 (None, 原文)。
+    纯数字前缀(如时间 12:30)不算说话人，避免吞掉正文。"""
     m = SPEAKER_RE.match(text or "")
-    if m:
+    if m and not m.group(1).isdigit():
         return m.group(1).strip(), m.group(2).strip()
     return None, (text or "").strip()
 
 
-def build_project(content, lang, default_voice_id):
-    """解析字幕→识别说话人→建可编辑工程态。每个角色默认指向 default_voice_id。"""
+def build_project(content, lang, default_voice_id, detect_speakers=True):
+    """解析字幕→识别说话人→建可编辑工程态。每个角色默认指向 default_voice_id。
+    detect_speakers=False：不拆前缀，所有行归到单一「默认」角色——适合无说话人、
+    但正文含冒号（时间/Note:/URL 等）的普通字幕，避免误拆吞字。"""
     cues_raw, dropped = tts_engine.parse_subtitles_ex(content)
     cues, speakers = [], {}
     for i, c in enumerate(cues_raw):
-        spk, clean = split_speaker(c["text"])
+        if detect_speakers:
+            spk, clean = split_speaker(c["text"])
+        else:
+            spk, clean = None, (c["text"] or "").strip()
         spk = spk or DEFAULT_SPEAKER
         speakers.setdefault(spk, default_voice_id)
         cues.append({"idx": i, "start": c["start"], "end": c["end"],

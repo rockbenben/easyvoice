@@ -105,6 +105,8 @@
   "prog.chars": "{d}/{t} chars",
   "prog.cues": "{d}/{t} lines",
   "sub.roles_title": "Voice per speaker",
+  "sub.detect_speakers": "Subtitles have speaker prefixes (Name: line)",
+  "sub.detect_speakers_info": "Off: treat every line as one default voice — use for plain subtitles whose text contains colons (times, Note:, URLs).",
   "sub.parse": "Parse subtitles",
   "sub.gen_all": "Generate all",
   "sub.col_idx": "#",

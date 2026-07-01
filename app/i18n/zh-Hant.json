@@ -105,6 +105,8 @@
   "prog.chars": "已生成 {d}/{t} 字",
   "prog.cues": "已合成 {d}/{t} 條字幕",
   "sub.roles_title": "角色配音",
+  "sub.detect_speakers": "字幕含說話人前綴（名字：台詞）",
+  "sub.detect_speakers_info": "關閉：所有行按單一預設音色配音——適合正文含冒號（時間、Note:、網址）的普通字幕，避免誤拆吞字。",
   "sub.parse": "解析字幕",
   "sub.gen_all": "生成全部",
   "sub.col_idx": "#",

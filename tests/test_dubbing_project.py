@@ -15,6 +15,29 @@ def test_split_speaker_and_build_project(monkeypatch):
     assert all(c["status"] == "pending" for c in proj["cues"])
 
 
+def test_split_speaker_ignores_incidental_colons():
+    """无说话人前缀但正文含冒号的行不得被误拆成「说话人：台词」而吞掉正文。"""
+    from app import dubbing_project as dp
+    # 多词短语(含空格) → 不是说话人，整句保留
+    assert dp.split_speaker("Meeting at 12:30 PM") == (None, "Meeting at 12:30 PM")
+    # 纯数字前缀(时间) → 不是说话人
+    assert dp.split_speaker("12:30 PM 开会") == (None, "12:30 PM 开会")
+    # 真说话人(单词、非数字)仍然识别
+    assert dp.split_speaker("张三：你好") == ("张三", "你好")
+    assert dp.split_speaker("John: hi") == ("John", "hi")
+
+
+def test_build_project_detect_speakers_off_keeps_text():
+    """detect_speakers=False：不拆前缀，所有行归到单一默认角色，正文一字不丢。"""
+    from app import dubbing_project as dp
+    srt = ("1\n00:00:01,000 --> 00:00:02,000\nMeeting at 12:30 PM\n\n"
+           "2\n00:00:03,000 --> 00:00:04,000\n张三：你好\n")
+    proj = dp.build_project(srt, "english", "v0", detect_speakers=False)
+    assert list(proj["speakers"].keys()) == [dp.DEFAULT_SPEAKER]
+    assert proj["cues"][0]["text"] == "Meeting at 12:30 PM"    # 冒号正文完整保留
+    assert proj["cues"][1]["text"] == "张三：你好"             # 前缀也不剥离(整行原样)
+
+
 def test_edits_mark_dirty():
     from app import dubbing_project as dp
     srt = ("1\n00:00:01,000 --> 00:00:02,000\n张三：你好\n\n"

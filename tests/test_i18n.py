@@ -21,7 +21,8 @@ def test_subtitle_dubbing_keys_present():
             "sub.mux_mode", "sub.mux_replace", "sub.mux_keep", "sub.export",
             "sub.video_out", "sub.select_hint", "status.pending", "status.ok",
             "status.error", "status.dirty", "err.no_project",
-            "sub.edit_apply", "sub.mux_failed", "sub.export_skipped"]
+            "sub.edit_apply", "sub.mux_failed", "sub.export_skipped",
+            "sub.detect_speakers", "sub.detect_speakers_info"]
     for loc in ("zh-Hans", "zh-Hant", "en"):
         tb = i18n.load(loc)
         for k in keys:

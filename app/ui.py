@@ -697,11 +697,11 @@ def _sub_table(project):
     return [[c["idx"] + 1, c["speaker"], c["text"], c["status"]] for c in project["cues"]]
 
 
-def do_sub_parse(file_path, lang, voice_id, request: gr.Request = None):
+def do_sub_parse(file_path, lang, voice_id, detect_speakers=True, request: gr.Request = None):
     if not file_path:
         raise gr.Error(i18n.t(_req_tb(request), "err.need_subtitle"))
     content = open(file_path, encoding="utf-8", errors="ignore").read()
-    project = _dub.build_project(content, lang, voice_id)
+    project = _dub.build_project(content, lang, voice_id, detect_speakers=detect_speakers)
     if not project["cues"]:
         raise gr.Error(i18n.t(_req_tb(request), "err.no_cues"))
     return (project, gr.update(value=_sub_table(project)),
@@ -1046,6 +1046,9 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                 _model_choices(tb), value=_default_model,
                                 label=I18N("model.title"), elem_classes=["ev-style"],
                                 visible=tts_engine.is_gpu())
+                            sub_detect_spk = gr.Checkbox(
+                                value=True, label=I18N("sub.detect_speakers"),
+                                info=I18N("sub.detect_speakers_info"))
                             sub_parse = gr.Button(I18N("sub.parse"), variant="primary")
                             sub_preview = gr.Markdown("", elem_classes=["ev-readout"])
                             roles_eb = gr.Markdown(I18N("sub.roles_title"))
@@ -1092,7 +1095,7 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 sub_file.change(do_subtitle_preview, sub_file, sub_preview, show_progress="hidden")
                 tab_subtitle.select(lambda: gr.update(choices=_voice_choices()), None, sub_voice,
                                     show_progress="hidden")
-                sub_parse.click(do_sub_parse, [sub_file, sub_lang, sub_voice],
+                sub_parse.click(do_sub_parse, [sub_file, sub_lang, sub_voice, sub_detect_spk],
                                 [_sub_proj, sub_table, _sub_sel, edit_text, edit_speaker, edit_audio],
                                 concurrency_id="ev_sub_project")
                 sub_table.select(do_sub_select, [_sub_proj],
@@ -1120,7 +1123,8 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
             text_in, gen, audio_out, voice_hint,
             vname, vref, vref_play, vadd, manage_hint, _vloc,
             preset_guide, dub_preset, dub_pname, dub_save,
-            sub_guide, sub_file, sub_lang, sub_voice, sub_model_radio, sub_parse, roles_eb, sub_table,
+            sub_guide, sub_file, sub_lang, sub_voice, sub_model_radio, sub_detect_spk,
+            sub_parse, roles_eb, sub_table,
             sub_gen, edit_eb, edit_text, edit_speaker, edit_apply, edit_reroll, edit_audio,
             sub_video, sub_mux, sub_export, sub_audio, sub_srt, sub_video_out,
             footer,
@@ -1178,6 +1182,8 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 sub_lang: gr.update(label=L("field.lang"), info=L("field.lang_info")),
                 sub_voice: gr.update(label=L("field.voice"), info=L("field.voice_info")),
                 sub_model_radio: gr.update(label=L("model.title"), choices=_model_choices(t)),
+                sub_detect_spk: gr.update(label=L("sub.detect_speakers"),
+                                          info=L("sub.detect_speakers_info")),
                 sub_parse: gr.update(value=L("sub.parse")),
                 roles_eb: gr.update(value=L("sub.roles_title")),
                 sub_table: gr.update(headers=["#", L("sub.col_speaker"),

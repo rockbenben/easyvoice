@@ -13,7 +13,7 @@
 - **3-second voice cloning** — upload or record ~3 seconds of reference audio to clone a voice for any text / subtitle dubbing.
 - **Multilingual** — 10 languages: Chinese, English, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian. Auto-detect by default, or pick manually.
 - **Remembers your settings** — language / voice / style / speed etc. are saved and restored on next launch.
-- **Subtitle dubbing (multi-speaker)** — upload subtitles (SRT / VTT / LRC); voices are auto-assigned per speaker, each line can be previewed / edited / re-rolled, generated timeline-aligned, and muxed straight into your video (dubbed video + aligned subtitles exported).
+- **Subtitle dubbing (multi-speaker)** — upload subtitles (SRT / VTT / LRC); voices are auto-assigned per speaker from leading `Name:` prefixes, each line can be previewed / edited / re-rolled, generated timeline-aligned, and muxed straight into your video (dubbed video + aligned subtitles exported). Plain subtitles without prefixes work too (single voice); turn off the *Subtitles have speaker prefixes* toggle when the text contains colons to avoid mis-splitting.
 - **Runs locally** — fully local inference, nothing uploaded to the cloud.
 - **GPU-adaptive** — uses CUDA automatically when a GPU is present, falls back to CPU otherwise.
 - **Quality switch (with an NVIDIA GPU)** — manually pick between **Fast 0.6B** and **High 1.7B** models (1.7B auto-downloads on first use); locked to 0.6B without a GPU.
@@ -133,6 +133,7 @@ It produces `dist/EasyVoice-vX.Y[-cpu]/` and a same-named `.zip`. The full bundl
 
 The following fixes are in the source and will ship with the next bundle build (download bundles are still v1.1.0):
 
+- **Subtitle dubbing · speaker detection** — tightened the leading `Name:` prefix rule so multi-word phrases and pure-digit times (e.g. `12:30`) are no longer mistaken for a speaker and dropped from the dub; added a *Subtitles have speaker prefixes* toggle to disable splitting entirely for plain subtitles that contain colons.
 - **Subtitle dubbing · replace-audio export** — the exported video now keeps its full length through the end. Previously, when the dub was shorter than the video (the last subtitle ends before the outro), trailing footage was silently truncated; it is now padded to the full video length.
 - **Subtitle dubbing · concurrency** — operations on the same subtitle project (parse / edit / re-roll / generate-all / export) now run serially, preventing project-state corruption and broken exports from concurrent clicks.
 - **Stability · GPU serialization** — generation across the Dubbing and Subtitle-dubbing tabs now runs serially, avoiding VRAM OOM or corrupted audio from simultaneous generation.
