@@ -53,6 +53,8 @@ A browser opens automatically at `http://127.0.0.1:7860`, with four tabs:
 - **My Voices** — upload or record reference voices and manage them (add / delete / rename / reorder / preview)
 - **Presets** — save frequently used parameter presets (language + voice) for quick reuse
 
+> **To quit:** close the **console window** that opened at launch (⚠️ closing the browser alone won't quit — the server keeps running in the background, holding memory and the port); or click the **Quit** button at the bottom-right of the page.
+
 ---
 
 ## For developers (run from source)

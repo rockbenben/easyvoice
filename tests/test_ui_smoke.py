@@ -64,6 +64,17 @@ def test_do_apply_style_returns_correct_params():
     assert ui.do_apply_style("natural") == (0.9, 0.90)
     assert ui.do_apply_style("lively") == (1.2, 0.95)
 
+
+def test_do_exit_schedules_and_reports(monkeypatch):
+    """退出按钮：触发进程退出(mock 掉，别真杀 pytest) + 回传本地化"已停止"文案。"""
+    from app import ui
+    called = {}
+    monkeypatch.setattr(ui, "_schedule_exit", lambda: called.setdefault("sched", True))
+    out = ui.do_exit()                       # request=None → 简体
+    assert called.get("sched") is True       # 已调度退出
+    val = out["value"] if isinstance(out, dict) else getattr(out, "value", None)
+    assert val and val != "app.exit_done"    # 非空且是译文(非原始 key)
+
 def test_do_voice_delete_clears_and_bumps(monkeypatch, tmp_path):
     from app import ui, voice_library, config
     monkeypatch.setattr(config, "VOICES_DIR", tmp_path / "v")

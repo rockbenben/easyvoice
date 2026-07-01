@@ -1,5 +1,7 @@
 {
   "app.title": "EasyVoice",
+  "app.exit": "⏻ Quit",
+  "app.exit_done": "EasyVoice has stopped — you can close this page and the console window.",
   "tab.tts": "Dub",
   "tab.voices": "My Voices",
   "tab.presets": "Presets",

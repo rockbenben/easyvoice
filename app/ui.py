@@ -309,6 +309,14 @@ html[data-uilang="en"] .ev-lang .lang-en{ background:#fff; color:var(--jade-d); 
 .ev-footer .ev-more a{ color:var(--jade-d); text-decoration:none; font-weight:500;}
 .ev-footer .ev-more a:hover{ text-decoration:underline;}
 
+/* ── 退出条(命令行窗口退出不直观，界面给个明确出口) ─ */
+.ev-exitbar{ justify-content:flex-end!important; margin:14px 0 0!important;}
+.gradio-container .ev-exit{ background:#FBECEA!important; border:1px solid #F0C9C0!important;
+  color:#9B4A3C!important; font-weight:600!important; border-radius:10px!important; flex:none!important;}
+.gradio-container .ev-exit:hover{ background:#F6D9D3!important;}
+.ev-exit-note{ text-align:right!important; color:var(--muted)!important; font-size:13px!important; margin:6px 2px 0!important;}
+.ev-exit-note *{ margin:0!important;}
+
 /* ── responsive: stack columns on narrow screens ───────── */
 @media (max-width:860px){
   .ev-row{ flex-direction:column!important;}
@@ -469,6 +477,19 @@ def do_model_hint(pref, request: gr.Request = None):
     """选 1.7B 且本地没有 → 弹一次"首次需下载"提示。"""
     if pref == "1.7b" and not tts_engine.has_17b_downloaded():
         gr.Info(i18n.t(_req_tb(request), "model.dl_hint"))
+
+
+def _schedule_exit():
+    """0.6s 后强制结束进程——留足时间让"已停止"响应先回到浏览器，再杀掉服务。"""
+    import os
+    import threading
+    threading.Timer(0.6, lambda: os._exit(0)).start()
+
+
+def do_exit(request: gr.Request = None):
+    """界面「退出」按钮：优雅告知后结束进程，普通用户无需去关命令行窗口。"""
+    _schedule_exit()
+    return gr.update(value=i18n.t(_req_tb(request), "app.exit_done"))
 
 
 def do_generate(text, lang, voice_id, temperature=0.9, top_p=0.9, speed=1.0,
@@ -1113,6 +1134,10 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 sub_export.click(_run_sub_export, [_sub_proj, sub_video, sub_mux],
                                  [sub_export, sub_audio, sub_srt, sub_video_out],
                                  concurrency_id="ev_sub_project")
+        with gr.Row(elem_classes=["ev-exitbar"]):
+            exit_btn = gr.Button(I18N("app.exit"), scale=0, min_width=128,
+                                 elem_classes=["ev-exit"])
+        exit_note = gr.Markdown("", elem_classes=["ev-exit-note"])
         footer = gr.HTML(_footer_html(lang))
 
         # ── 界面语言：手动切换(?__lang=)或浏览器自动，在 load 时服务端整体重排 ──
@@ -1129,7 +1154,7 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
             sub_parse, roles_eb, sub_table,
             sub_gen, edit_eb, edit_text, edit_speaker, edit_apply, edit_reroll, edit_audio,
             sub_video, sub_mux, sub_export, sub_audio, sub_srt, sub_video_out,
-            footer,
+            exit_btn, footer,
         ]
 
         def _relabel(request: gr.Request):
@@ -1205,6 +1230,7 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 sub_audio: gr.update(label=L("field.result")),
                 sub_srt: gr.update(label=L("sub.srt")),
                 sub_video_out: gr.update(label=L("sub.video_out")),
+                exit_btn: gr.update(value=L("app.exit")),
                 footer: gr.update(value=_footer_html(loc)),
             }
 
@@ -1235,5 +1261,6 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
         demo.load(_restore_settings, _settings, _persist, show_progress="hidden")
 
         demo.load(_relabel, None, _relabel_targets, show_progress="hidden")
+        exit_btn.click(do_exit, None, exit_note)   # 界面退出：告知后结束进程
         demo.queue()
     return demo

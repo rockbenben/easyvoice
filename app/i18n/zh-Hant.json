@@ -1,5 +1,7 @@
 {
   "app.title": "易聲 EasyVoice",
+  "app.exit": "⏻ 退出",
+  "app.exit_done": "易聲已停止，可關閉此頁面與命令列視窗。",
   "tab.tts": "配音",
   "tab.voices": "我的音色庫",
   "tab.presets": "常用方案",
