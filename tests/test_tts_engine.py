@@ -2,17 +2,6 @@ import numpy as np
 from app import tts_engine as te
 
 
-def test_select_no_cuda_forces_cpu_06b(monkeypatch):
-    monkeypatch.setattr(te, "_cuda_available", lambda: False)
-    assert te.select_device_and_model(has_17b=True) == ("cpu", te.config.MODEL_06B)
-
-
-def test_select_cuda_prefers_17b_when_present(monkeypatch):
-    monkeypatch.setattr(te, "_cuda_available", lambda: True)
-    assert te.select_device_and_model(has_17b=True) == ("cuda", te.config.MODEL_17B)
-    assert te.select_device_and_model(has_17b=False) == ("cuda", te.config.MODEL_06B)
-
-
 def test_synthesize_writes_wav(tmp_path, monkeypatch):
     monkeypatch.setattr(te.config, "OUTPUTS_DIR", tmp_path)
     monkeypatch.setattr(te, "_cuda_available", lambda: False)
@@ -116,8 +105,7 @@ def test_synthesize_splits_and_concatenates(tmp_path, monkeypatch):
 
 def test_warmup_calls_load(monkeypatch):
     loaded = []
-    monkeypatch.setattr(te, "has_17b_downloaded", lambda: False)
-    monkeypatch.setattr(te, "select_device_and_model", lambda h: ("cpu", "m"))
+    monkeypatch.setattr(te, "resolve_model_pref", lambda pref: ("cpu", "m"))
     monkeypatch.setattr(te, "_load", lambda mid, dev: loaded.append((mid, dev)))
     te.warmup()
     assert loaded == [("m", "cpu")]
@@ -146,24 +134,6 @@ def test_parse_subtitles_drops_absurd_timestamps():
     assert all(0 <= s < 6 * 3600 for s in starts)
 
 
-def test_synthesize_subtitles_assembles_timeline(tmp_path, monkeypatch):
-    monkeypatch.setattr(te.config, "OUTPUTS_DIR", tmp_path)
-    monkeypatch.setattr(te, "_cuda_available", lambda: False)
-    monkeypatch.setattr(te, "has_17b_downloaded", lambda: False)
-
-    class _Fake:
-        def generate_voice_clone(self, text, **k):     # 批量：每句 0.1s
-            return [np.zeros(2400, dtype=np.float32) for _ in text], 24000
-
-    monkeypatch.setattr(te, "_load", lambda mid, dev: _Fake())
-    cues = [{"start": 0.0, "end": 1.0, "text": "a"}, {"start": 2.0, "end": 3.0, "text": "b"}]
-    wav, srt = te.synthesize_subtitles(cues, "chinese", "ref.wav")
-    import soundfile as sf
-    import os
-    assert abs(sf.info(wav).duration - 2.1) < 0.05    # 第二句 2.0s 开始 + 0.1s = 2.1s
-    assert os.path.exists(srt) and "-->" in open(srt, encoding="utf-8").read()
-
-
 def test_parse_subtitles_ex_reports_dropped_count():
     # 超 6h 上限的条数要回报，供 UI 提示，避免长字幕被静默截断
     srt = ("1\n99:00:00,000 --> 99:00:05,000\n你好\n\n"
@@ -172,28 +142,6 @@ def test_parse_subtitles_ex_reports_dropped_count():
     assert dropped == 1 and len(cues) == 1 and cues[0]["text"] == "世界"
     cues2, dropped2 = te.parse_subtitles_ex("1\n00:00:01,000 --> 00:00:02,000\nA\n")
     assert dropped2 == 0 and len(cues2) == 1
-
-
-def test_synthesize_subtitles_trims_leading_silence(tmp_path, monkeypatch):
-    """字幕路径也要去 qwen-tts 偶发首尾静音：否则前导静音把语音起点推后 → 错位且误触发限速压缩。"""
-    monkeypatch.setattr(te.config, "OUTPUTS_DIR", tmp_path)
-    monkeypatch.setattr(te, "_cuda_available", lambda: False)
-    monkeypatch.setattr(te, "has_17b_downloaded", lambda: False)
-    sr = 24000
-
-    class _Fake:
-        def generate_voice_clone(self, text, **k):         # 每条：1s 前导静音 + 0.5s 有声
-            seg = np.concatenate([np.zeros(sr, np.float32),
-                                  np.full(int(sr * 0.5), 0.5, np.float32)])
-            return [seg for _ in text], sr
-
-    monkeypatch.setattr(te, "_load", lambda mid, dev: _Fake())
-    wav, _srt = te.synthesize_subtitles([{"start": 0.0, "end": 5.0, "text": "a"}],
-                                        "chinese", "ref.wav")
-    import soundfile as sf
-    audio, _ = sf.read(wav, dtype="float32")
-    first = int(np.nonzero(np.abs(audio) > 0.01)[0][0]) / sr
-    assert first < 0.2                 # 起点≈0(已去 1s 前导静音)；未修剪则会在 ~1.0s
 
 
 def test_cues_to_srt_format():
@@ -330,28 +278,12 @@ def test_resolve_model_pref_gpu_explicit_and_auto(monkeypatch):
     assert te.resolve_model_pref("auto") == ("cuda", te.config.MODEL_17B)   # 有 1.7B → 1.7B
 
 
-def test_ensure_local_downloads_when_absent(monkeypatch):
-    calls = []
-    monkeypatch.setattr(te, "resolve_model_dir", lambda mid: mid)            # 永远"未本地"
-    monkeypatch.setattr(te, "ensure_model", lambda mid: calls.append(mid))
-    te._ensure_local("X")
-    assert calls == ["X"]
-
-
-def test_ensure_local_skips_when_present(monkeypatch):
-    calls = []
-    monkeypatch.setattr(te, "resolve_model_dir", lambda mid: "/local/path")  # 已本地
-    monkeypatch.setattr(te, "ensure_model", lambda mid: calls.append(mid))
-    te._ensure_local("X")
-    assert calls == []
-
-
 def test_synthesize_routes_model_pref_to_17b(tmp_path, monkeypatch):
     monkeypatch.setattr(te.config, "OUTPUTS_DIR", tmp_path)
     monkeypatch.setattr(te, "_cuda_available", lambda: True)
     monkeypatch.setattr(te, "has_17b_downloaded", lambda: False)
     ensured = []
-    monkeypatch.setattr(te, "_ensure_local", lambda mid: ensured.append(mid))
+    monkeypatch.setattr(te, "ensure_model", lambda mid: ensured.append(mid))
     seen = {}
 
     def _mock_raw(text, lang, ref, device, model_id, **k):
@@ -368,7 +300,7 @@ def test_synthesize_routes_model_pref_to_17b(tmp_path, monkeypatch):
 def test_synthesize_one_routes_model_pref(monkeypatch):
     monkeypatch.setattr(te, "_cuda_available", lambda: True)
     monkeypatch.setattr(te, "has_17b_downloaded", lambda: False)
-    monkeypatch.setattr(te, "_ensure_local", lambda mid: None)
+    monkeypatch.setattr(te, "ensure_model", lambda mid: None)
     seen = {}
 
     class _Fake:

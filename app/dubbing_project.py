@@ -36,8 +36,8 @@ def build_project(content, lang, default_voice_id, detect_speakers=True):
         speakers.setdefault(spk, default_voice_id)
         cues.append({"idx": i, "start": c["start"], "end": c["end"],
                      "speaker": spk, "text": clean,
-                     "audio_path": None, "dur": None, "status": "pending"})
-    return {"id": uuid.uuid4().hex[:8], "video_path": None, "lang": lang,
+                     "audio_path": None, "status": "pending"})
+    return {"id": uuid.uuid4().hex[:8], "lang": lang,
             "speakers": speakers, "cues": cues, "dropped": dropped, "params": {}}
 
 
@@ -82,30 +82,21 @@ def _cue_dir(project):
 
 
 def generate_cue(project, idx, seed_override=None):
-    """按该 cue 角色对应音色合成单条，写缓存 wav，置 audio_path/dur/status。
-    音色缺失或合成失败 → status='error'（不抛，不中断整体）。"""
+    """按该 cue 角色对应音色合成单条，写缓存 wav，置 audio_path/status。
+    任一步失败(音色缺失/合成/写盘) → status='error'（不抛，不中断整体）。"""
     c = _cue(project, idx)
-    voice_id = project["speakers"].get(c["speaker"])
-    try:
-        ref = voice_library.get_audio_path(voice_id)
-    except Exception:
-        c["status"] = "error"
-        return project
     params = dict(project.get("params") or {})
     if seed_override is not None:
         params["seed"] = seed_override
     try:
+        ref = voice_library.get_audio_path(project["speakers"].get(c["speaker"]))
         audio, sr = tts_engine.synthesize_one(c["text"], project["lang"], ref, params)
-    except Exception:
-        c["status"] = "error"
-        return project
-    try:
         path = str(_cue_dir(project) / f"cue_{c['idx']}.wav")
         sf.write(path, audio, sr)
     except Exception:
         c["status"] = "error"
         return project
-    c["audio_path"], c["dur"], c["status"] = path, len(audio) / sr, "ok"
+    c["audio_path"], c["status"] = path, "ok"
     return project
 
 
@@ -135,5 +126,4 @@ def assemble(project):
                       "text": c["text"], "audio": audio})
     if not items:
         raise ValueError("还没有已生成的配音")
-    max_speedup = float((project.get("params") or {}).get("max_speedup", 1.5))
-    return tts_engine.assemble_timeline(items, max_speedup=max_speedup)
+    return tts_engine.assemble_timeline(items)

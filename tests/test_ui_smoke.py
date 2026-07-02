@@ -466,12 +466,20 @@ def test_do_save_preset_collision_raises_grerror(monkeypatch, tmp_path):
 
 def test_subtitle_handlers_serialized_on_shared_concurrency_id():
     # 字幕配音里改同一 project 的 handler 必须共享 concurrency_id，
-    # 否则 Gradio queue 会并行不同事件、并发改同一 gr.State dict → 竞态污染导出
+    # 否则 Gradio queue 会并行不同事件、并发改同一 gr.State dict → 竞态污染导出。
+    # 结构化断言真正的不变量：凡输出(改写) _sub_proj 的静态事件都必须串行——
+    # 新增改 project 的 handler 忘了挂 id 会在此失败，而非靠数数。
     from app import ui
     demo = ui.build_ui("zh-Hans")
-    ids = [getattr(f, "concurrency_id", None) for f in demo.fns.values()]
-    # 静态绑定的 5 个：parse / edit / reroll / gen-all / export（role-change 在 gr.render 内，不入静态图）
-    assert ids.count("ev_sub_project") >= 5
+    fns = list(demo.fns.values())
+    parse = next(f for f in fns if getattr(f.fn, "__name__", "") == "do_sub_parse")
+    proj_state = parse.outputs[0]                      # do_sub_parse 首个输出即 _sub_proj State
+    writers = [f for f in fns if proj_state in getattr(f, "outputs", [])]
+    assert len(writers) >= 4                           # parse / edit / reroll / gen-all(render 内的不入静态图)
+    assert all(getattr(f, "concurrency_id", None) == "ev_sub_project" for f in writers)
+    # export 只读 project 但也须串行（避免生成中途读到半改状态）
+    export = next(f for f in fns if getattr(f.fn, "__name__", "") == "_run_sub_export")
+    assert getattr(export, "concurrency_id", None) == "ev_sub_project"
 
 
 def test_do_generate_deleted_voice_midgen_friendly_error(monkeypatch, tmp_path):

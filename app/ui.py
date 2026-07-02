@@ -479,6 +479,18 @@ def do_model_hint(pref, request: gr.Request = None):
         gr.Info(i18n.t(_req_tb(request), "model.dl_hint"))
 
 
+def _mk_progress_cb(progress, tb, key):
+    """把 gr.Progress 包成引擎的 progress_cb(done,total)：文案本地化({d}/{t} 占位)，
+    进度上报失败不打断生成。配音(按字)与字幕(按条)共用，只差 i18n key。"""
+    def cb(done, total):
+        try:
+            progress(done / total if total else 0,
+                     desc=i18n.t(tb, key).replace("{d}", str(done)).replace("{t}", str(total)))
+        except Exception:
+            pass
+    return cb
+
+
 def _schedule_exit():
     """0.6s 后强制结束进程——留足时间让"已停止"响应先回到浏览器，再杀掉服务。"""
     import os
@@ -502,14 +514,7 @@ def do_generate(text, lang, voice_id, temperature=0.9, top_p=0.9, speed=1.0,
     except KeyError:
         raise gr.Error(i18n.t(_req_tb(request), "err.voice_missing"))
     tb = _req_tb(request)
-
-    def cb(done, total):                                # 实时进度："已生成 X/Y 字"
-        try:
-            progress(done / total if total else 0,
-                     desc=i18n.t(tb, "prog.chars").replace("{d}", str(done)).replace("{t}", str(total)))
-        except Exception:
-            pass
-
+    cb = _mk_progress_cb(progress, tb, "prog.chars")    # 实时进度："已生成 X/Y 字"
     try:
         return tts_engine.synthesize(
             text, lang, ref, temperature, top_p, speed,
@@ -713,6 +718,11 @@ def _run_generate(text, lang, voice_id, temperature=0.9, top_p=0.9, speed=1.0,
     yield idle, audio
 
 
+# 改同一字幕工程(gr.State dict)的 handler 共享此 concurrency_id → Gradio queue 串行，
+# 防并发改 project 竞态。字符串重复易打错(错了会静默各排各的队)，统一用常量。
+_SUB_CC = "ev_sub_project"
+
+
 def _sub_table(project):
     """工程态 → 状态表二维数组（# / 角色 / 文本 / 状态）。"""
     if not project:
@@ -787,14 +797,9 @@ def _run_sub_gen_all(project, model_pref="auto", request: gr.Request = None, pro
         raise gr.Error(i18n.t(tb, "err.no_project"))
     yield busy, gr.update(), project
     try:
-        def cb(done, total):
-            try:
-                progress(done / total if total else 0,
-                         desc=i18n.t(tb, "prog.cues").replace("{d}", str(done)).replace("{t}", str(total)))
-            except Exception:
-                pass
         project.setdefault("params", {})["model"] = model_pref
-        _dub.generate_all(project, progress_cb=cb)
+        _dub.generate_all(project,
+                          progress_cb=_mk_progress_cb(progress, tb, "prog.cues"))
     except Exception:
         yield idle, gr.update(), project
         raise
@@ -1085,7 +1090,7 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                                      label=spk)
                                     dd.change(lambda vid, p, _spk=spk: _role_change(p, _spk, vid),
                                               [dd, _sub_proj], [_sub_proj, sub_table],
-                                              show_progress="hidden", concurrency_id="ev_sub_project")
+                                              show_progress="hidden", concurrency_id=_SUB_CC)
                     with gr.Column(scale=3, min_width=360):
                         with gr.Group(elem_classes=["ev-card"]):
                             sub_table = gr.Dataframe(
@@ -1120,20 +1125,20 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                     show_progress="hidden")
                 sub_parse.click(do_sub_parse, [sub_file, sub_lang, sub_voice, sub_detect_spk],
                                 [_sub_proj, sub_table, _sub_sel, edit_text, edit_speaker, edit_audio],
-                                concurrency_id="ev_sub_project")
+                                concurrency_id=_SUB_CC)
                 sub_table.select(do_sub_select, [_sub_proj],
                                  [_sub_sel, edit_text, edit_speaker, edit_audio])
                 edit_apply.click(do_sub_edit_text,
                                  [_sub_proj, _sub_sel, edit_text, edit_speaker],
-                                 [_sub_proj, sub_table], concurrency_id="ev_sub_project")
+                                 [_sub_proj, sub_table], concurrency_id=_SUB_CC)
                 edit_reroll.click(do_sub_reroll, [_sub_proj, _sub_sel, sub_model_radio],
-                                  [_sub_proj, sub_table, edit_audio], concurrency_id="ev_sub_project")
+                                  [_sub_proj, sub_table, edit_audio], concurrency_id=_SUB_CC)
                 sub_gen.click(_run_sub_gen_all, [_sub_proj, sub_model_radio],
-                              [sub_gen, sub_table, _sub_proj], concurrency_id="ev_sub_project")
+                              [sub_gen, sub_table, _sub_proj], concurrency_id=_SUB_CC)
                 sub_model_radio.change(do_model_hint, sub_model_radio, None, show_progress="hidden")
                 sub_export.click(_run_sub_export, [_sub_proj, sub_video, sub_mux],
                                  [sub_export, sub_audio, sub_srt, sub_video_out],
-                                 concurrency_id="ev_sub_project")
+                                 concurrency_id=_SUB_CC)
         with gr.Row(elem_classes=["ev-exitbar"]):
             exit_btn = gr.Button(I18N("app.exit"), scale=0, min_width=128,
                                  elem_classes=["ev-exit"])
@@ -1142,23 +1147,8 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
 
         # ── 界面语言：手动切换(?__lang=)或浏览器自动，在 load 时服务端整体重排 ──
         # gr.I18n 运行时无法改 locale，故用确定性的服务端 relabel 覆盖全部组件（含 Tab 标签）。
-        _relabel_targets = [
-            hero, steps, eb_setup, eb_compose, eb_voadd, eb_vomng,
-            tab_tts, tab_voices, tab_presets, tab_subtitle,
-            lang_dd, voice_dd, style_radio, speed, model_radio, accordion, adv_hint, temperature, top_p,
-            top_k, rep_pen, max_tokens, tok_est, seed_in,
-            text_in, gen, audio_out, voice_hint,
-            vname, vref, vref_play, vadd, manage_hint, _vloc,
-            preset_guide, dub_preset, dub_pname, dub_save,
-            sub_guide, sub_file, sub_lang, sub_voice, sub_model_radio, sub_detect_spk,
-            sub_parse, roles_eb, sub_table,
-            sub_gen, edit_eb, edit_text, edit_speaker, edit_apply, edit_reroll, edit_audio,
-            sub_video, sub_mux, sub_export, sub_audio, sub_srt, sub_video_out,
-            exit_btn, footer,
-        ]
-
-        def _relabel(request: gr.Request):
-            loc = _lang_from_request(request)
+        # targets 由 updates dict 的键派生(单一事实源)：漏列会静默不翻译，两处手工同步曾是隐患。
+        def _relabel_updates(loc):
             t = i18n.load(loc)
 
             def L(k):
@@ -1233,6 +1223,11 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 exit_btn: gr.update(value=L("app.exit")),
                 footer: gr.update(value=_footer_html(loc)),
             }
+
+        _relabel_targets = list(_relabel_updates(lang).keys())
+
+        def _relabel(request: gr.Request):
+            return _relabel_updates(_lang_from_request(request))
 
         # ── 记住配音设置：浏览器 localStorage 持久化(换会话/重启自动恢复上次选择)──
         # 不持久化 temp/top_p：它们由 style 经 do_apply_style 派生(style_radio.change→温度/top_p)。

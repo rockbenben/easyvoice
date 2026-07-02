@@ -66,16 +66,10 @@ def is_gpu() -> bool:
     return _cuda_available()
 
 
-def select_device_and_model(has_17b: bool) -> tuple:
-    if _cuda_available():
-        return ("cuda", config.MODEL_17B if has_17b else config.MODEL_06B)
-    return ("cpu", config.MODEL_06B)
-
-
 def resolve_model_pref(pref):
-    """pref: 'auto' | '0.6b' | '1.7b' → (device, model_id)。
+    """pref: 'auto' | '0.6b' | '1.7b' → (device, model_id)。设备/默认档的唯一策略源。
     CPU 永远 0.6B(忽略 pref)；GPU: auto=有1.7B就用否则0.6B，显式档照选。
-    不在此下载——下载由 _ensure_local 懒触发。"""
+    不在此下载——下载由 _prep_generation 懒触发。"""
     if not _cuda_available():
         return ("cpu", config.MODEL_06B)
     if pref == "1.7b":
@@ -85,10 +79,19 @@ def resolve_model_pref(pref):
     return ("cuda", config.MODEL_17B if has_17b_downloaded() else config.MODEL_06B)
 
 
-def _ensure_local(model_id):
-    """选了 1.7B 但本地缺失 → ensure_model 拉取(控制台进度)。0.6B/已下载则 no-op。"""
-    if resolve_model_dir(model_id) == model_id:   # resolve_model_dir 不存在则原样返回 → 未本地
-        ensure_model(model_id)
+def _prep_generation(model_pref, seed):
+    """两个合成入口(synthesize / synthesize_one)的公共前置：
+    解析模型档位 → 仅 1.7B 懒下载(0.6B 是常驻基座、启动已 ensure，
+    引擎路径不再触碰 ensure_model → 现有测试/CI 无下载风险) → 设种子。
+    seed>0 固定可复现；0 → 自然变化。返回 (device, model_id)。"""
+    device, model_id = resolve_model_pref(model_pref)
+    if model_id == config.MODEL_17B:
+        ensure_model(model_id)          # 幂等：已在本地直接返回，不下载
+    seed = int(seed or 0)
+    if seed > 0:
+        import torch
+        torch.manual_seed(seed)
+    return device, model_id
 
 
 _MODEL_CACHE = {}
@@ -117,7 +120,7 @@ def _load(model_id: str, device: str):
 def warmup() -> None:
     """后台预加载模型，避免首次生成时的加载等待；出错静默(真正生成时会再报)。"""
     try:
-        device, model_id = select_device_and_model(has_17b_downloaded())
+        device, model_id = resolve_model_pref("auto")
         _load(model_id, device)
     except Exception:
         pass
@@ -242,12 +245,7 @@ def synthesize(text, lang, ref_audio_path,
                top_k=50, repetition_penalty=1.0, max_new_tokens=2048,
                ref_text=None, seed=0, model="auto", progress_cb=None) -> str:
     text = normalize_text(text, lang)
-    device, model_id = resolve_model_pref(model)
-    if model_id == config.MODEL_17B:        # 仅 1.7B 需懒下载；0.6B 是常驻基座(启动已 ensure)，
-        _ensure_local(model_id)             # 0.6B 路径不触碰 ensure_model → 现有测试/CI 无下载风险
-    if seed and int(seed) > 0:                          # 固定种子 → 同参数可复现
-        import torch
-        torch.manual_seed(int(seed))
+    device, model_id = _prep_generation(model, seed)    # 选型/1.7B 懒下载/种子(见其 docstring)
     chunks = _split_text(text) if len(text) > _SPLIT_THRESHOLD else [text]
     if not chunks:                       # 全空白/纯标点超长 → 退回单段，避免 concatenate([]) 崩溃
         chunks = [text]
@@ -409,23 +407,15 @@ def synthesize_one(text, lang, ref_audio_path, params=None):
     「生成全部」与「单条重录」共用此函数，保证行为一致。返回 (audio, sr)。"""
     params = params or {}
     text = normalize_text(text, lang)
-    device, model_id = resolve_model_pref(params.get("model", "auto"))
-    if model_id == config.MODEL_17B:        # 仅 1.7B 懒下载；0.6B 路径不 ensure → 现有测试无下载风险
-        _ensure_local(model_id)
-    seed = int(params.get("seed", 0) or 0)
-    if seed > 0:                                   # 固定种子→可复现；0→自然变化(供重录出不同条)
-        import torch
-        torch.manual_seed(seed)
-    model = _load(model_id, device)
+    device, model_id = _prep_generation(params.get("model", "auto"),
+                                        params.get("seed", 0))
     cap = _cue_token_cap(text, int(params.get("max_new_tokens", 2048)))
-    with _INFER_LOCK:                      # 见 _INFER_LOCK：串行化跨 Tab 并发前向
-        wavs, sr = model.generate_voice_clone(
-            text=text, language=lang, ref_audio=ref_audio_path,
-            non_streaming_mode=True, do_sample=True,
-            temperature=params.get("temperature", 0.9), top_p=params.get("top_p", 0.9),
-            top_k=params.get("top_k", 50),
-            repetition_penalty=params.get("repetition_penalty", 1.0),
-            max_new_tokens=cap, x_vector_only_mode=True)
+    wavs, sr = _raw_synthesize(              # 复用统一推理包装(内含 _INFER_LOCK 与克隆模式 kwargs)
+        text, lang, ref_audio_path, device, model_id,
+        temperature=params.get("temperature", 0.9), top_p=params.get("top_p", 0.9),
+        top_k=params.get("top_k", 50),
+        repetition_penalty=params.get("repetition_penalty", 1.0),
+        max_new_tokens=cap)
     return _trim_silence(np.asarray(wavs[0], dtype=np.float32), sr), sr
 
 
@@ -452,27 +442,3 @@ def assemble_timeline(items, max_speedup=1.5, sr=24000):
     with open(srt_path, "w", encoding="utf-8") as f:
         f.write(cues_to_srt(new_cues))
     return wav_path, srt_path
-
-
-def synthesize_subtitles(cues, lang, ref_audio_path,
-                         temperature=0.9, top_p=0.9, top_k=50,
-                         repetition_penalty=1.0, max_new_tokens=2048,
-                         ref_text=None, seed=0, max_speedup=1.5, progress_cb=None):
-    """逐条用同一音色生成(synthesize_one)再按时间轴拼装(assemble_timeline)。
-    返回 (wav 路径, 对齐后的 srt 路径)。向后兼容：签名与返回不变。"""
-    valid = [c for c in cues if normalize_text(c.get("text", ""), lang).strip()]
-    if not valid:
-        raise ValueError("字幕没有可用内容")
-    params = dict(temperature=temperature, top_p=top_p, top_k=top_k,
-                  repetition_penalty=repetition_penalty,
-                  max_new_tokens=max_new_tokens, seed=seed)
-    if progress_cb:
-        progress_cb(0, len(valid))
-    items = []
-    for i, c in enumerate(valid):
-        audio, _sr = synthesize_one(c["text"], lang, ref_audio_path, params)
-        items.append({"start": c["start"], "end": c["end"],
-                      "text": c["text"], "audio": audio})
-        if progress_cb:
-            progress_cb(i + 1, len(valid))
-    return assemble_timeline(items, max_speedup=max_speedup)
