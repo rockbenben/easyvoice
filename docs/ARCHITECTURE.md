@@ -7,7 +7,7 @@
 
 单机本地的 Gradio 应用，基于 Qwen3-TTS 做声音克隆 + 多语言配音。全程本地推理，不上云。
 
-- **入口** `app_main.py::main()`：建目录 → 把随包 `ffmpeg/` 前置进 `PATH` → 确保 0.6B 模型（缺则下载）→ 播种示例音色/预设 → `build_ui()` → 后台线程预热模型 → `demo.launch()` 绑定 `127.0.0.1:7860`，`allowed_paths=[outputs, voices]`（否则 Gradio 拒绝外发本地音频）。
+- **入口** `app_main.py::main()`：建目录 → 把随包 `ffmpeg/` 前置进 `PATH` → 确保 0.6B 模型（缺则下载）→ 播种示例音色/预设 → `build_ui()` → 后台线程预热模型 → `demo.launch()` 起本地服务（默认端口 7860，被占用/被系统保留时自动回退到备用端口，见 4.8），`allowed_paths=[outputs, voices]`（否则 Gradio 拒绝外发本地音频）。
 - **四个标签页**（`app/ui.py`）：配音 · 我的音色库 · 常用方案 · 字幕配音。
 - **数据落盘**：`voices/`（音色库 + `index.json`）、`presets/`（每方案一个 JSON）、`outputs/`（生成结果）、`models/`（权重）；均在 `.gitignore` 里。
 
@@ -66,6 +66,10 @@ Gradio `demo.queue()` 默认 `default_concurrency_limit=1`：**同 `concurrency_
 - 生成用**生成器** handler：先 `yield` 禁用按钮（生成中），无论成功/出错都 `yield` 复位——不能用 `.then` 复位，异常后 `.then` 不执行会把按钮永久卡在「生成中」。
 - 友好 `gr.Error`：音色中途被删（文件消失）、未选行、无可导出内容等给中英友好提示，真实错误仍原样冒泡不掩盖。
 - 优雅降级：ffmpeg 缺失（变速/合成）、输出目录不可写、超长时间戳等都降级而非崩溃。
+
+### 4.8 启动与退出
+- **端口回退**：`demo.launch` 依次尝试 `7860 → 7861 → 8600 → 9000 → 5000`，首个能绑定的即启动；`launch` 在端口被占用/被系统保留（Hyper-V/WSL 动态保留段，`netstat` 看不到）时会同步抛 `OSError`，被逐个 `try/except` 兜住，全失败才抛友好 `RuntimeError`。避免"端口 7860 不可用就整个崩"。
+- **退出**：gradio 服务是常驻进程，**只关浏览器不会退出**（服务仍占内存与端口）。故给三条出口：界面右下「⏻ 退出」按钮（`do_exit` → 回传"已停止"文案 → `_schedule_exit` 延迟 0.6s `os._exit(0)`，留足响应回传时间）、关闭命令行窗口、窗口内 `Ctrl+C`；`Start EasyVoice.bat` 与 README 均明示"仅关浏览器不退出"。
 
 ## 5. 测试
 `tests/` 覆盖各模块纯函数与 UI handler（mock 掉真实 TTS/ffmpeg），CI 无模型下载。运行：
