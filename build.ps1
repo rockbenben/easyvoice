@@ -7,19 +7,22 @@
        这比把 torch / qwen-tts 重新 pip 装进 python-embed 可靠得多
        （见设计文档 §6 风险表的"退回 Miniconda 便携版"备选）。
 
- 产物：
-   dist\易声-v1.0\                ← 整合包目录（可直接拷给用户）
+ 产物（<Ver> 即 -Version，CPU 精简包目录名再加 -cpu 后缀）：
+   dist\EasyVoice-<Ver>\          ← 整合包目录（可直接拷给用户）
      ├─ runtime\                  ← 内嵌 Python 3.12 + 全部依赖（conda-pack 解包）
      ├─ app\  app_main.py         ← 程序
      ├─ models\Qwen\...0___6B...  ← 预装 0.6B 模型权重
+     ├─ assets\ README*.md ...    ← 包内文档与图片（README 的相对链接靠它们才不失效）
      ├─ voices\ presets\ outputs\ ← 空的用户数据目录
      └─ Start EasyVoice.bat              ← 用户唯一双击的入口
-   dist\易声-v1.0.zip             ← 压缩包（托管/分发用）
+   dist\EasyVoice-<Ver>.zip       ← 压缩包（托管/分发用）
 
  用法（在 base 环境的 PowerShell 7 里，于项目根目录执行）：
-     pwsh -File build.ps1
-   可选参数：
-     pwsh -File build.ps1 -EnvName easyvoice -Version v1.0 -CondaRoot D:\miniconda3
+     pwsh -File build.ps1 -Version v1.2.0
+   -Version 决定产物目录名与 zip 名，发版时必须显式传：默认值写死在下面的 param 块里，
+   漏传会产出与上一版同名的目录 / zip，直接覆盖 dist\ 里上一版的打包产物。
+   其余可选参数：
+     pwsh -File build.ps1 -Version v1.2.0 -EnvName easyvoice -CondaRoot D:\miniconda3
 
  注意：
    - 需要先 `python app_main.py` 跑通过一次（确认 easyvoice 环境可用）。
@@ -30,7 +33,7 @@
 [CmdletBinding()]
 param(
   [string]$EnvName   = "easyvoice",
-  [string]$Version   = "v1.1.0",
+  [string]$Version   = "v1.2.0",
   [string]$CondaRoot = "$env:USERPROFILE\miniconda3",
   [string]$ModelId   = "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
   [ValidateSet("gpu","cpu")][string]$Variant = "gpu"
@@ -75,6 +78,9 @@ if (-not (Test-Path (Join-Path $ProjectRoot "Start EasyVoice.bat"))) { throw "�
 if (Get-NetTCPConnection -LocalPort 7860 -State Listen -ErrorAction SilentlyContinue) {
   Write-Warning "检测到 7860 端口有 app 在运行，建议先关闭再打包（避免锁定 runtime 文件）。"
 }
+if (-not $PSBoundParameters.ContainsKey('Version')) {
+  Write-Warning "未显式指定 -Version，将沿用脚本默认值 $Version。发版请显式传 -Version，否则会覆盖 dist\ 里同名的上一版产物。"
+}
 $zipTool = if ($SevenZip) { "7-Zip" } elseif ($UseTar) { "tar/bsdtar" } else { "PowerShell 内置（较慢）" }
 Ok "conda / 环境 / 项目结构就绪；压缩工具：$zipTool"
 
@@ -118,9 +124,21 @@ Ok "runtime\ 就绪（Python 3.12 + torch + qwen-tts + gradio）"
 Step 4 "复制 app/ 与启动器"
 Copy-Item (Join-Path $ProjectRoot "app")         (Join-Path $Stage "app") -Recurse -Force
 Copy-Item (Join-Path $ProjectRoot "app_main.py") $Stage -Force
-foreach ($f in @("README.md", "requirements.txt")) {
+# 包内 README 会链到这些文档与图片；不一并带上，解压后的相对链接就全部指向不存在的文件
+foreach ($f in @(
+    "README.md", "README.en.md",
+    "DEVELOPMENT.md", "DEVELOPMENT.en.md",
+    "CHANGELOG.md", "CHANGELOG.en.md",
+    "LICENSE", "requirements.txt",
+    "docs\ARCHITECTURE.md", "docs\SPIKE-qwen-tts.md",
+    "assets\brand\social-card.png", "assets\brand\social-card.en.png",
+    "assets\packaging\THIRD-PARTY-NOTICES.txt")) {
   $p = Join-Path $ProjectRoot $f
-  if (Test-Path $p) { Copy-Item $p $Stage -Force }
+  if (-not (Test-Path $p)) { Write-Warning "缺少 $f —— 整合包内 README 指向它的链接会失效"; continue }
+  $dest    = Join-Path $Stage $f
+  $destDir = Split-Path $dest -Parent
+  if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Force -Path $destDir | Out-Null }
+  Copy-Item $p $dest -Force
 }
 # 清掉打包进来的 __pycache__
 Get-ChildItem (Join-Path $Stage "app") -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue |
@@ -128,7 +146,7 @@ Get-ChildItem (Join-Path $Stage "app") -Recurse -Directory -Filter "__pycache__"
 # 启动器：复制并强制 CRLF + UTF-8(无 BOM)，确保 cmd 正确执行中文 .bat
 $batText = (Get-Content (Join-Path $ProjectRoot "Start EasyVoice.bat") -Raw) -replace "`r?`n", "`r`n"
 [IO.File]::WriteAllText((Join-Path $Stage "Start EasyVoice.bat"), $batText, (New-Object Text.UTF8Encoding($false)))
-Ok "app/、app_main.py、Start EasyVoice.bat 已就位"
+Ok "app/、app_main.py、Start EasyVoice.bat、README / DEVELOPMENT / CHANGELOG / LICENSE 与 assets/ 已就位"
 
 # ---- 5. 模型权重（0.6B）+ 许可声明 -------------------------------------------
 if ($Variant -eq "cpu") {

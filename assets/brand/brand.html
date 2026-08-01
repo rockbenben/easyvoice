@@ -42,24 +42,28 @@
   #logo .en{ font-family:'Space Mono',monospace; font-size:15px; letter-spacing:7px; color:var(--jade); text-transform:uppercase;}
 
   /* ---- SOCIAL CARD 1200x630 ---- */
-  #card{ width:1200px; height:630px; border-radius:0; position:relative; overflow:hidden; color:#EAF4EE;
+  .card{ width:1200px; height:630px; border-radius:0; position:relative; overflow:hidden; color:#EAF4EE;
     background:linear-gradient(135deg,#0C4C3B 0%,#15795C 58%,#1FA277 100%); padding:74px 80px;}
-  #card .wmk{ position:absolute; right:-30px; bottom:-150px; font-family:'Noto Serif SC',serif; font-weight:900;
+  .card .wmk{ position:absolute; right:-30px; bottom:-150px; font-family:'Noto Serif SC',serif; font-weight:900;
     font-size:620px; line-height:1; color:#CFEEDF; opacity:.07; pointer-events:none;}
-  #card .top{ display:flex; align-items:center; gap:16px; position:relative; z-index:1;}
-  #card .cm{ width:66px; height:66px; border-radius:16px; display:flex; align-items:center; justify-content:center;
+  .card .top{ display:flex; align-items:center; gap:16px; position:relative; z-index:1;}
+  .card .cm{ width:66px; height:66px; border-radius:16px; display:flex; align-items:center; justify-content:center;
     background:rgba(255,255,255,.12); position:relative;}
-  #card .cm .sheng{ font-family:'Noto Serif SC',serif; font-weight:900; font-size:42px; color:#fff;}
-  #card .brand-zh{ font-family:'Noto Serif SC',serif; font-weight:900; font-size:38px; letter-spacing:3px; color:#fff;}
-  #card .brand-en{ font-family:'Space Mono',monospace; font-size:15px; letter-spacing:6px; color:var(--mint);}
-  #card .promise{ position:relative; z-index:1; font-family:'Noto Serif SC',serif; font-weight:700; font-size:84px;
+  .card .cm .sheng{ font-family:'Noto Serif SC',serif; font-weight:900; font-size:42px; color:#fff;}
+  .card .brand-zh{ font-family:'Noto Serif SC',serif; font-weight:900; font-size:38px; letter-spacing:3px; color:#fff;}
+  .card .brand-en{ font-family:'Space Mono',monospace; font-size:15px; letter-spacing:6px; color:var(--mint);}
+  .card .promise{ position:relative; z-index:1; font-family:'Noto Serif SC',serif; font-weight:700; font-size:84px;
     line-height:1.15; margin-top:78px; color:#fff; letter-spacing:1px;}
-  #card .promise .qk{ color:var(--mint);}
-  #card .sub{ position:relative; z-index:1; font-family:'Noto Serif SC',serif; font-weight:400; font-size:34px;
-    color:#CFEAD D; color:#CFEADB; margin-top:14px;}
-  #card .tag{ position:absolute; left:80px; bottom:62px; z-index:1; font-size:21px; color:#A9D8C6; letter-spacing:.5px;}
-  #card .pill{ position:absolute; right:80px; bottom:60px; z-index:1; font:600 18px 'Noto Sans SC';
+  .card .promise .qk{ color:var(--mint);}
+  .card .sub{ position:relative; z-index:1; font-family:'Noto Serif SC',serif; font-weight:400; font-size:34px;
+    color:#CFEADB; margin-top:14px;}
+  .card .tag{ position:absolute; left:80px; bottom:62px; z-index:1; font-size:21px; color:#A9D8C6; letter-spacing:.5px;}
+  .card .pill{ position:absolute; right:80px; bottom:60px; z-index:1; font:600 18px 'Noto Sans SC';
     background:rgba(255,255,255,.14); color:#EAF4EE; padding:10px 20px; border-radius:999px;}
+  /* 英文卡：同一版式，英文文案更长，字号收一点避免底部两行撞上 */
+  #card-en .promise{ font-size:72px; letter-spacing:0;}
+  #card-en .sub{ font-size:30px;}
+  #card-en .tag{ font-size:19px;}
 </style></head><body>
 
 <div class="cell"><div class="label">mark 1 · 声+「」</div>
@@ -80,8 +84,8 @@
   <div id="logo"><div class="lm"><span class="qk ql">「</span><span class="sheng">声</span><span class="qk qr">」</span></div>
     <div class="wm"><span class="zh">易声</span><span class="en">EasyVoice</span></div></div></div>
 
-<div class="cell" style="width:100%"><div class="label">social card 1200×630</div>
-  <div id="card">
+<div class="cell" style="width:100%"><div class="label">social card 1200×630 · zh → social-card.png</div>
+  <div class="card" id="card">
     <span class="wmk">声</span>
     <div class="top"><div class="cm"><span class="sheng">声</span></div>
       <div><div class="brand-zh">易声</div><div class="brand-en">EASYVOICE</div></div></div>
@@ -89,6 +93,17 @@
     <div class="sub">Turn text into a voice — local, free, private</div>
     <div class="tag">本地运行 · 完全免费 · 声音不离开你的电脑 · 10 种语言声音克隆</div>
     <div class="pill">⚡ 双击即用 · No setup</div>
+  </div></div>
+
+<div class="cell" style="width:100%"><div class="label">social card 1200×630 · en → social-card.en.png</div>
+  <div class="card" id="card-en" lang="en">
+    <span class="wmk">声</span>
+    <div class="top"><div class="cm"><span class="sheng">声</span></div>
+      <div><div class="brand-zh">易声</div><div class="brand-en">EASYVOICE</div></div></div>
+    <div class="promise"><span class="qk">「</span>Turn text into a voice<span class="qk">」</span></div>
+    <div class="sub">Voice cloning &amp; subtitle dubbing, built on Qwen3-TTS</div>
+    <div class="tag">Runs locally · Completely free · 10 languages · 3-second cloning</div>
+    <div class="pill">⚡ Double-click · No setup</div>
   </div></div>
 
 </body></html>

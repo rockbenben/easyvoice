@@ -1,6 +1,8 @@
 # Developer notes · EasyVoice
 
-End users do not need this page — download a bundle and double-click, see the [README](README.en.md).
+**English** · [简体中文](DEVELOPMENT.md)
+
+End users do not need this page — download a bundle and double-click, see the [README](README.en.md). For architecture and module design, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## For developers (run from source)
 
@@ -34,7 +36,7 @@ End users do not need this page — download a bundle and double-click, see the 
 python app_main.py
 ```
 
-A browser opens at `http://127.0.0.1:7860`.
+A browser opens at `http://127.0.0.1:7860`. If 7860 is taken or falls inside a Windows reserved port range, the app falls back to an alternate port (7861 / 8600 / 9000 / 5000) — trust the address printed in the console.
 
 ### Tests
 
@@ -65,6 +67,8 @@ easyvoice/
 ├── Start EasyVoice.bat   # Windows launcher
 ├── requirements.txt      # Python dependencies
 ├── pyproject.toml        # pytest config
+├── assets/               # Brand images (brand/) and packaging notices (packaging/)
+├── docs/                 # Architecture & design docs (ARCHITECTURE.md, SPIKE-qwen-tts.md)
 └── tests/                # Automated tests
 ```
 
@@ -77,8 +81,12 @@ easyvoice/
 `build.ps1` packs the validated conda env into an unzip-and-double-click bundle:
 
 ```powershell
-pwsh -File build.ps1                 # Full bundle: GPU/CPU auto, model bundled (~4.6 GB)
-pwsh -File build.ps1 -Variant cpu    # CPU lite: no CUDA, no model (~0.5 GB; model downloaded in-app on first launch)
+pwsh -File build.ps1 -Version v1.2.0                  # Full bundle: GPU/CPU auto, model bundled (~4.6 GB)
+pwsh -File build.ps1 -Version v1.2.0 -Variant cpu     # CPU lite: no CUDA, no model (~0.5 GB; model downloaded in-app on first launch)
 ```
 
-It produces `dist/EasyVoice-vX.Y[-cpu]/` and a same-named `.zip`. The full bundle exceeds GitHub's 2 GB per-asset limit — split it into volumes (with `merge-and-extract.bat`) or host externally; the CPU lite bundle is a single file.
+> ⚠️ **Always pass `-Version` when cutting a release.** The default is hardcoded in the `param` block of `build.ps1` and does not track the release. Omitting it produces a directory and zip named after whatever that default happens to be, overwriting an existing build in `dist/` and shipping mislabeled assets.
+>
+> The remaining parameters (`-EnvName` / `-CondaRoot` / `-ModelId`) are documented in the header comment of `build.ps1` and rarely need changing.
+
+It produces `dist/EasyVoice-<Version>[-cpu]/` and a same-named `.zip`. The full bundle exceeds GitHub's 2 GB per-asset limit — split it into volumes (with `merge-and-extract.bat`) or host externally; the CPU lite bundle is a single file.

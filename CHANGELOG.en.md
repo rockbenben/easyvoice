@@ -1,12 +1,16 @@
 # Changelog
 
+**English** · [简体中文](CHANGELOG.md)
+
 Full notes for each release are on [Releases](../../releases).
 
 ## Unreleased
 
-In the source, not yet in a bundle build — [run from source](DEVELOPMENT.en.md) to get these now.
+Nothing yet. Changes that are in the source but not yet in a bundle build get listed here — [run from source](DEVELOPMENT.en.md) to get them early.
 
-- **UI · Quit button** — a new "⏻ Quit" button (bottom-right) cleanly stops the server; the console window and this README also make clear that ⚠️ closing the browser alone won't quit (the server keeps running, holding memory and the port).
+## v1.2.0 · 2026-08-01
+
+- **UI · Quit button** — a new "⏻ Quit" button (bottom-right) cleanly stops the server; the console window and the [README](README.en.md) also make clear that ⚠️ closing the browser alone won't quit (the server keeps running, holding memory and the port).
 - **Launch · port fallback** — if 7860 is taken or falls inside a Windows reserved port range, the app no longer crashes on start; it automatically tries alternate ports (7861 / 8600 / 9000 / 5000) and the browser opens the actual one.
 - **Dubbing · preset & style sync** — applying a preset now updates the style chip to match the preset's temperature (no longer diverging from the sliders), and that style is persisted, so the preset's temperature / top_p are reproduced after a reload.
 - **Subtitle dubbing · speaker detection** — tightened the leading `Name:` prefix rule so multi-word phrases and pure-digit times (e.g. `12:30`) are no longer mistaken for a speaker and dropped from the dub; added a _Subtitles have speaker prefixes_ toggle to disable splitting entirely for plain subtitles that contain colons.

@@ -1,12 +1,12 @@
 # EasyVoice (易声)
 
-> a local, multilingual, dead-simple dubbing / voice-cloning tool built on Qwen3-TTS
+> A local, multilingual, dead-simple dubbing / voice-cloning tool built on Qwen3-TTS.
 
 **English** · [简体中文](README.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/rockbenben/easyvoice)](https://github.com/rockbenben/easyvoice/releases/latest) [![Powered by Qwen3-TTS](https://img.shields.io/badge/Powered%20by-Qwen3--TTS-orange.svg)](https://github.com/QwenLM/Qwen3-TTS) [![365 Open Source Plan #018](https://img.shields.io/badge/365%20Open%20Source%20Plan-%23018-1f6feb)](https://github.com/rockbenben/365opensource)
 
-![EasyVoice — turn text into a voice](assets/brand/social-card.png)
+![EasyVoice — turn text into a voice](assets/brand/social-card.en.png)
 
 ## Overview
 
@@ -15,7 +15,7 @@
 - **3-second voice cloning** — upload or record ~3 seconds of reference audio to clone a voice for any text / subtitle dubbing.
 - **Multilingual** — 10 languages: Chinese, English, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian. Auto-detect by default, or pick manually.
 - **Remembers your settings** — language / voice / style / speed etc. are saved and restored on next launch.
-- **Subtitle dubbing (multi-speaker)** — upload subtitles (SRT / VTT / LRC); voices are auto-assigned per speaker from leading `Name:` prefixes, each line can be previewed / edited / re-rolled, generated timeline-aligned, and muxed straight into your video (dubbed video + aligned subtitles exported). Plain subtitles without prefixes work too (single voice); turn off the _Subtitles have speaker prefixes_ toggle when the text contains colons to avoid mis-splitting.
+- **Subtitle dubbing (multi-speaker)** — upload subtitles (SRT / VTT / LRC); voices are auto-assigned per speaker from leading `Name:` prefixes, each line can be previewed / edited / re-rolled, generated timeline-aligned, and muxed straight into your video (dubbed video + aligned subtitles exported). Plain subtitles without prefixes work too (single voice); turn off the _Subtitles have speaker prefixes_ toggle when the text contains colons to avoid mis-splitting. Only have audio/video and no subtitles yet? Run it through [funasr-subtitle](https://github.com/rockbenben/funasr-subtitle) first to get an `.srt`.
 - **Runs locally** — fully local inference, nothing uploaded to the cloud.
 - **GPU-adaptive** — uses CUDA automatically when a GPU is present, falls back to CPU otherwise.
 - **Quality switch (with an NVIDIA GPU)** — manually pick between **Fast 0.6B** and **High 1.7B** models (1.7B auto-downloads on first use); locked to 0.6B without a GPU.
@@ -26,6 +26,8 @@
 ## Download
 
 Grab a bundle from **[Releases](../../releases/latest)** — two options:
+
+> 🇨🇳 **Faster mirror for mainland China**: <https://alist.newzone.top:9003/apps/EasyVoice>
 
 | Bundle                         | Size                      | Best for                | Model                                       |
 | ------------------------------ | ------------------------- | ----------------------- | ------------------------------------------- |
@@ -47,11 +49,11 @@ Pick a bundle from [Download](#download) above and unzip it locally.
 
 Run `Start EasyVoice.bat` in the folder. The first launch takes ~30s (model loading).
 
-> **Note:** Double-click launch requires the bundle (which ships its own `runtime/` and model). Prebuilt bundles are in [Download](#download) above; `build.ps1` builds one yourself. To run from source, see **For developers** below.
+> **Note:** Double-click launch requires the bundle (which ships its own `runtime/` and model). Prebuilt bundles are in [Download](#download) above. To run from source, or to build a bundle yourself with `build.ps1` (it lives in the source repo), see **[DEVELOPMENT.en.md](DEVELOPMENT.en.md)**.
 
 ### 3. Use it in the browser
 
-A browser opens automatically at `http://127.0.0.1:7860`, with four tabs:
+A browser opens automatically at `http://127.0.0.1:7860` (if that port is taken the app falls back to another one — trust the address printed in the console window), with four tabs:
 
 - **Dubbing** — type text, pick a language (Auto by default) and reference voice, click generate
 - **Subtitle dubbing** — upload subtitles → assign a voice per speaker → fix lines (preview / edit / re-roll) → assemble & export (optionally muxed into your video)
