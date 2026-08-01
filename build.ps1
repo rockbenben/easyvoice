@@ -1,33 +1,41 @@
 <#
 ================================================================================
- build.ps1 — 阶段二：把「易声」打包成"解压双击即用"的整合包（Windows）
+ build.ps1 - Stage 2: pack EasyVoice into an unzip-and-double-click bundle (Windows)
 ================================================================================
- 策略：用 conda-pack 打包已验证可用的 `easyvoice` conda 环境（内含 Python 3.12 +
-       CUDA 版 torch + qwen-tts + gradio；无 N 卡时 torch 自动退回 CPU）。
-       这比把 torch / qwen-tts 重新 pip 装进 python-embed 可靠得多
-       （见设计文档 §6 风险表的"退回 Miniconda 便携版"备选）。
+ Strategy: use conda-pack on the already-validated `easyvoice` conda env (Python
+       3.12 + CUDA torch + qwen-tts + gradio; torch falls back to CPU with no
+       NVIDIA GPU). Far more reliable than pip-installing torch / qwen-tts into
+       a python-embed tree (see the design doc, section 6 risk table, fallback
+       "portable Miniconda").
 
- 产物（<Ver> 即 -Version，CPU 精简包目录名再加 -cpu 后缀）：
-   dist\EasyVoice-<Ver>\          ← 整合包目录（可直接拷给用户）
-     ├─ runtime\                  ← 内嵌 Python 3.12 + 全部依赖（conda-pack 解包）
-     ├─ app\  app_main.py         ← 程序
-     ├─ models\Qwen\...0___6B...  ← 预装 0.6B 模型权重
-     ├─ assets\ README*.md ...    ← 包内文档与图片（README 的相对链接靠它们才不失效）
-     ├─ voices\ presets\ outputs\ ← 空的用户数据目录
-     └─ Start EasyVoice.bat              ← 用户唯一双击的入口
-   dist\EasyVoice-<Ver>.zip       ← 压缩包（托管/分发用）
+ Output (<Ver> is -Version; the CPU lite bundle appends a -cpu suffix):
+   dist\EasyVoice-<Ver>\          <- bundle directory (hand this to users as-is)
+     |- runtime\                  <- embedded Python 3.12 + deps (conda-pack)
+     |- app\  app_main.py         <- the program
+     |- models\Qwen\...0___6B...  <- preinstalled 0.6B model weights
+     |- assets\ README*.md ...    <- in-bundle docs and images (the README's
+     |                               relative links break without them)
+     |- voices\ presets\ outputs\ <- empty user-data directories
+     \- Start EasyVoice.bat       <- the only thing a user double-clicks
+   dist\EasyVoice-<Ver>.zip       <- archive (for hosting / distribution)
 
- 用法（在 base 环境的 PowerShell 7 里，于项目根目录执行）：
+ Usage (from the project root, in PowerShell 7 on the base env):
      pwsh -File build.ps1 -Version v1.1.1
-   -Version 决定产物目录名与 zip 名，发版时必须显式传：默认值写死在下面的 param 块里，
-   漏传会产出与上一版同名的目录 / zip，直接覆盖 dist\ 里上一版的打包产物。
-   其余可选参数：
+   -Version names the output directory and zip, and MUST be passed explicitly
+   when cutting a release: the default below is hardcoded, so omitting it
+   produces a directory / zip named after the previous version and overwrites
+   that build in dist\.
+   Other optional parameters:
      pwsh -File build.ps1 -Version v1.1.1 -EnvName easyvoice -CondaRoot D:\miniconda3
 
- 注意：
-   - 需要先 `python app_main.py` 跑通过一次（确认 easyvoice 环境可用）。
-   - 打包前建议关闭正在运行的 app（占用 7860 端口），避免文件锁定。
-   - 产物约 6-8GB，请确保磁盘空间充足。
+ Notes:
+   - Run `python app_main.py` successfully once first (confirms the env works).
+   - Close any running app (port 7860) before packing, to avoid file locks.
+   - Output is roughly 6-8GB; make sure there is disk space.
+
+ This script is intentionally ASCII-only: it is read and run by Windows
+ PowerShell 5.1 and by consoles on non-UTF-8 code pages, where non-ASCII
+ comments and output turn into mojibake.
 ================================================================================
 #>
 [CmdletBinding()]
@@ -40,12 +48,13 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-# native 命令（conda / robocopy / 7z）的非零退出码由我们自己判断，不要自动抛异常
+# Non-zero exit codes from native commands (conda / robocopy / 7z) are checked
+# by hand below, so do not let them throw automatically.
 $PSNativeCommandUseErrorActionPreference = $false
 
 $ProjectRoot = $PSScriptRoot
 if ($Variant -eq "cpu") {
-  if ($EnvName -eq "easyvoice") { $EnvName = "easyvoice-cpu" }   # 未显式指定则用 CPU 环境
+  if ($EnvName -eq "easyvoice") { $EnvName = "easyvoice-cpu" }   # use the CPU env unless told otherwise
   $DistName    = "EasyVoice-$Version-cpu"
 } else {
   $DistName    = "EasyVoice-$Version"
@@ -59,72 +68,77 @@ $Conda       = Join-Path $CondaRoot "condabin\conda.bat"
 function Step($n, $m) { Write-Host "`n==== [$n] $m ====" -ForegroundColor Cyan }
 function Ok($m)        { Write-Host "  [OK] $m" -ForegroundColor Green }
 
-# 7-Zip 比 PowerShell 的 Compress/Expand-Archive 快很多，且稳妥处理 >4GB（zip64）
+# 7-Zip is much faster than PowerShell's Compress/Expand-Archive and handles
+# >4GB (zip64) safely.
 $SevenZip = $null
 foreach ($c in @("$env:ProgramFiles\7-Zip\7z.exe", "${env:ProgramFiles(x86)}\7-Zip\7z.exe", "7z.exe")) {
   if (Test-Path $c) { $SevenZip = $c; break }
   $g = Get-Command $c -ErrorAction SilentlyContinue
   if ($g) { $SevenZip = $g.Source; break }
 }
-# bsdtar(Windows 10+ 自带 tar.exe) 也能稳妥处理 >4GB 的 zip，作为无 7-Zip 时的首选回退
+# bsdtar (tar.exe, shipped with Windows 10+) also handles >4GB zips safely and
+# is the preferred fallback when 7-Zip is absent.
 $UseTar = [bool](Get-Command tar.exe -ErrorAction SilentlyContinue)
 
-# ---- 0. 预检 -----------------------------------------------------------------
-Step 0 "预检环境"
-if (-not (Test-Path $Conda))                              { throw "找不到 conda：$Conda（用 -CondaRoot 指定 miniconda 根目录）" }
-if (-not (Test-Path (Join-Path $EnvPath "python.exe")))   { throw "找不到 conda 环境 '$EnvName'：$EnvPath" }
-if (-not (Test-Path (Join-Path $ProjectRoot "app\ui.py"))){ throw "请在项目根目录运行（缺 app\ui.py）" }
-if (-not (Test-Path (Join-Path $ProjectRoot "Start EasyVoice.bat"))) { throw "缺少 Start EasyVoice.bat" }
+# ---- 0. Preflight ------------------------------------------------------------
+Step 0 "Preflight"
+if (-not (Test-Path $Conda))                              { throw "conda not found: $Conda (use -CondaRoot to point at the miniconda root)" }
+if (-not (Test-Path (Join-Path $EnvPath "python.exe")))   { throw "conda env '$EnvName' not found: $EnvPath" }
+if (-not (Test-Path (Join-Path $ProjectRoot "app\ui.py"))){ throw "run this from the project root (app\ui.py is missing)" }
+if (-not (Test-Path (Join-Path $ProjectRoot "Start EasyVoice.bat"))) { throw "Start EasyVoice.bat is missing" }
 if (Get-NetTCPConnection -LocalPort 7860 -State Listen -ErrorAction SilentlyContinue) {
-  Write-Warning "检测到 7860 端口有 app 在运行，建议先关闭再打包（避免锁定 runtime 文件）。"
+  Write-Warning "An app appears to be running on port 7860; close it before packing (it locks runtime files)."
 }
 if (-not $PSBoundParameters.ContainsKey('Version')) {
-  Write-Warning "未显式指定 -Version，将沿用脚本默认值 $Version。发版请显式传 -Version，否则会覆盖 dist\ 里同名的上一版产物。"
+  Write-Warning "-Version was not passed; falling back to the script default $Version. Pass -Version when cutting a release, or this overwrites the same-named previous build in dist\."
 }
-$zipTool = if ($SevenZip) { "7-Zip" } elseif ($UseTar) { "tar/bsdtar" } else { "PowerShell 内置（较慢）" }
-Ok "conda / 环境 / 项目结构就绪；压缩工具：$zipTool"
+$zipTool = if ($SevenZip) { "7-Zip" } elseif ($UseTar) { "tar/bsdtar" } else { "PowerShell built-in (slow)" }
+Ok "conda / env / project layout ready; archiver: $zipTool"
 
-# ---- 1. 确保 base 有 conda-pack ----------------------------------------------
-Step 1 "确保 conda-pack 可用"
+# ---- 1. Make sure base has conda-pack ----------------------------------------
+Step 1 "Ensure conda-pack is available"
 & $Conda run -n base python -c "import conda_pack" 2>$null
 if ($LASTEXITCODE -ne 0) {
-  Write-Host "  安装 conda-pack 到 base（仅用 conda-forge，规避 defaults 渠道的 ToS 限制）..."
+  Write-Host "  Installing conda-pack into base (conda-forge only, to avoid the defaults channel ToS)..."
   & $Conda install -n base -y --override-channels -c conda-forge conda-pack
   if ($LASTEXITCODE -ne 0) {
-    Write-Host "  conda 安装失败，改用 pip 安装 conda-pack ..."
+    Write-Host "  conda install failed; falling back to pip ..."
     & $Conda run -n base python -m pip install -q conda-pack
-    if ($LASTEXITCODE -ne 0) { throw "conda-pack 安装失败（conda-forge 与 pip 均失败）" }
+    if ($LASTEXITCODE -ne 0) { throw "conda-pack install failed (both conda-forge and pip)" }
   }
 }
-Ok "conda-pack 就绪"
+Ok "conda-pack ready"
 
-# ---- 2. 准备打包目录 ---------------------------------------------------------
-Step 2 "准备打包目录"
+# ---- 2. Prepare the stage directory ------------------------------------------
+Step 2 "Prepare the stage directory"
 if (Test-Path $Stage) { Remove-Item $Stage -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
-Ok "已清理并创建 $Stage"
+Ok "cleaned and created $Stage"
 
-# ---- 3. conda-pack 打包环境 -> runtime\ --------------------------------------
-Step 3 "打包 conda 环境（约 5GB，请耐心，数分钟）"
+# ---- 3. conda-pack the env -> runtime\ ---------------------------------------
+Step 3 "Pack the conda env (about 5GB, takes a few minutes)"
 $packZip = Join-Path $Dist "runtime.zip"
 if (Test-Path $packZip) { Remove-Item $packZip -Force }
 & $Conda run -n base conda-pack -n $EnvName -o "$packZip" --format zip --n-threads -1 --ignore-missing-files --force
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path $packZip)) { throw "conda-pack 打包失败" }
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $packZip)) { throw "conda-pack failed" }
 
-Write-Host "  解压 runtime ..."
-if     ($SevenZip) { & $SevenZip x "$packZip" "-o$RuntimeDir" -y | Out-Null; if ($LASTEXITCODE -ne 0) { throw "7z 解压失败" } }
-elseif ($UseTar)   { & tar.exe -xf "$packZip" -C "$RuntimeDir";              if ($LASTEXITCODE -ne 0) { throw "tar 解压失败" } }
+Write-Host "  Extracting runtime ..."
+if     ($SevenZip) { & $SevenZip x "$packZip" "-o$RuntimeDir" -y | Out-Null; if ($LASTEXITCODE -ne 0) { throw "7z extract failed" } }
+elseif ($UseTar)   { & tar.exe -xf "$packZip" -C "$RuntimeDir";              if ($LASTEXITCODE -ne 0) { throw "tar extract failed" } }
 else               { Expand-Archive -Path $packZip -DestinationPath $RuntimeDir -Force }
 Remove-Item $packZip -Force
-if (-not (Test-Path (Join-Path $RuntimeDir "python.exe")))                 { throw "runtime 解压异常：缺 python.exe" }
-if (-not (Test-Path (Join-Path $RuntimeDir "Scripts\conda-unpack.exe")))   { throw "runtime 解压异常：缺 conda-unpack.exe" }
-Ok "runtime\ 就绪（Python 3.12 + torch + qwen-tts + gradio）"
+if (-not (Test-Path (Join-Path $RuntimeDir "python.exe")))                 { throw "bad runtime extract: python.exe missing" }
+if (-not (Test-Path (Join-Path $RuntimeDir "Scripts\conda-unpack.exe")))   { throw "bad runtime extract: conda-unpack.exe missing" }
+Ok "runtime\ ready (Python 3.12 + torch + qwen-tts + gradio)"
 
-# ---- 4. 复制程序 + 启动器 ----------------------------------------------------
-Step 4 "复制 app/ 与启动器"
+# ---- 4. Copy the program + launcher ------------------------------------------
+Step 4 "Copy app/ and the launcher"
 Copy-Item (Join-Path $ProjectRoot "app")         (Join-Path $Stage "app") -Recurse -Force
 Copy-Item (Join-Path $ProjectRoot "app_main.py") $Stage -Force
-# 包内 README 会链到这些文档与图片；不一并带上，解压后的相对链接就全部指向不存在的文件
+# The bundled README links to these documents and images. Leave one out and the
+# corresponding relative link points at a file that does not exist once the
+# bundle is extracted. Adding a relative link to the README means adding the
+# target here too.
 foreach ($f in @(
     "README.md", "README.en.md",
     "DEVELOPMENT.md", "DEVELOPMENT.en.md",
@@ -134,43 +148,44 @@ foreach ($f in @(
     "assets\brand\social-card.png", "assets\brand\social-card.en.png",
     "assets\packaging\THIRD-PARTY-NOTICES.txt")) {
   $p = Join-Path $ProjectRoot $f
-  if (-not (Test-Path $p)) { Write-Warning "缺少 $f —— 整合包内 README 指向它的链接会失效"; continue }
+  if (-not (Test-Path $p)) { Write-Warning "missing $f -- the bundled README's link to it will break"; continue }
   $dest    = Join-Path $Stage $f
   $destDir = Split-Path $dest -Parent
   if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Force -Path $destDir | Out-Null }
   Copy-Item $p $dest -Force
 }
-# 清掉打包进来的 __pycache__
+# Drop any __pycache__ that came along
 Get-ChildItem (Join-Path $Stage "app") -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue |
   Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-# 启动器：复制并强制 CRLF + UTF-8(无 BOM)，确保 cmd 正确执行中文 .bat
+# Launcher: copy with forced CRLF + UTF-8 (no BOM) so cmd runs the .bat correctly
 $batText = (Get-Content (Join-Path $ProjectRoot "Start EasyVoice.bat") -Raw) -replace "`r?`n", "`r`n"
 [IO.File]::WriteAllText((Join-Path $Stage "Start EasyVoice.bat"), $batText, (New-Object Text.UTF8Encoding($false)))
-Ok "app/、app_main.py、Start EasyVoice.bat、README / DEVELOPMENT / CHANGELOG / LICENSE 与 assets/ 已就位"
+Ok "app/, app_main.py, Start EasyVoice.bat, README / DEVELOPMENT / CHANGELOG / LICENSE and assets/ are in place"
 
-# ---- 5. 模型权重（0.6B）+ 许可声明 -------------------------------------------
+# ---- 5. Model weights (0.6B) + license notices -------------------------------
 if ($Variant -eq "cpu") {
-  Step 5 "CPU 精简包：跳过内置模型（首次启动时在工具内下载）"
+  Step 5 "CPU lite bundle: skipping the bundled model (downloaded in-app on first launch)"
   Copy-Item (Join-Path $ProjectRoot "assets\packaging\THIRD-PARTY-NOTICES.txt") `
             (Join-Path $Stage "THIRD-PARTY-NOTICES.txt") -Force
-  Ok "已跳过模型；第三方声明已放置"
+  Ok "model skipped; third-party notices placed"
 } else {
-  Step 5 "准备模型权重（0.6B）"
+  Step 5 "Prepare model weights (0.6B)"
   $srcModelOrg = Join-Path $ProjectRoot "models\Qwen"
   $dstModelOrg = Join-Path $Stage "models\Qwen"
-  $modelLeaf   = "Qwen3-TTS-12Hz-0___6B-Base"   # ModelScope 把 '.' 写成 '___'，tts_engine 据此解析
+  $modelLeaf   = "Qwen3-TTS-12Hz-0___6B-Base"   # ModelScope writes '.' as '___'; tts_engine parses it back
   if (Test-Path (Join-Path $srcModelOrg $modelLeaf)) {
-    Write-Host "  复制已下载模型 ..."
+    Write-Host "  Copying the already-downloaded model ..."
     New-Item -ItemType Directory -Force -Path $dstModelOrg | Out-Null
     robocopy "$srcModelOrg" "$dstModelOrg" /E /NFL /NDL /NJH /NJS /NP | Out-Null
-    if ($LASTEXITCODE -ge 8) { throw "模型复制失败（robocopy=$LASTEXITCODE）" }
+    if ($LASTEXITCODE -ge 8) { throw "model copy failed (robocopy=$LASTEXITCODE)" }
   } else {
-    Write-Host "  本地无模型，改用 modelscope 下载到打包目录 ..."
+    Write-Host "  No local model; downloading via modelscope into the stage directory ..."
     $env:MODELSCOPE_CACHE = (Join-Path $Stage "models")
     & (Join-Path $EnvPath "python.exe") -c "from modelscope import snapshot_download; snapshot_download('$ModelId')"
-    if ($LASTEXITCODE -ne 0) { throw "模型下载失败" }
+    if ($LASTEXITCODE -ne 0) { throw "model download failed" }
   }
-  # Apache-2.0：模型目录内放置完整许可文本（再分发义务）
+  # Apache-2.0: place the full license text inside the model directory
+  # (redistribution obligation)
   $apacheCache = Join-Path $Dist "_cache\LICENSE-Apache-2.0.txt"
   if (-not (Test-Path $apacheCache)) {
     New-Item -ItemType Directory -Force -Path (Split-Path $apacheCache) | Out-Null
@@ -178,21 +193,22 @@ if ($Variant -eq "cpu") {
   }
   $modelDir = Join-Path $dstModelOrg $modelLeaf
   if (Test-Path $modelDir) { Copy-Item $apacheCache (Join-Path $modelDir "LICENSE") -Force }
-  # 顶层第三方许可声明（模型 / FFmpeg / 运行时）——模板随仓库版本控制
+  # Top-level third-party notices (model / FFmpeg / runtime) - template is
+  # version-controlled with the repo
   Copy-Item (Join-Path $ProjectRoot "assets\packaging\THIRD-PARTY-NOTICES.txt") `
             (Join-Path $Stage "THIRD-PARTY-NOTICES.txt") -Force
-  Ok "模型许可(LICENSE) 与第三方声明(THIRD-PARTY-NOTICES) 已打包"
+  Ok "model LICENSE and THIRD-PARTY-NOTICES packaged"
 }
 
-# ---- 6. 用户数据空目录 -------------------------------------------------------
-Step 6 "创建用户数据目录"
+# ---- 6. Empty user-data directories ------------------------------------------
+Step 6 "Create user-data directories"
 foreach ($d in @("voices", "presets", "outputs")) {
   New-Item -ItemType Directory -Force -Path (Join-Path $Stage $d) | Out-Null
 }
-Ok "voices/ presets/ outputs/ 已创建"
+Ok "voices/ presets/ outputs/ created"
 
-# ---- 6.5 ffmpeg（语速功能所需；缺失时 app 会优雅降级）------------------------
-Step "6.5" "准备 ffmpeg（语速功能所需）"
+# ---- 6.5 ffmpeg (needed for speed control; the app degrades gracefully) ------
+Step "6.5" "Prepare ffmpeg (needed for speed control)"
 $ffDir   = Join-Path $Stage "ffmpeg"
 $ffExe   = Join-Path $ffDir "ffmpeg.exe"
 $cache   = Join-Path $Dist "_cache"
@@ -202,7 +218,7 @@ try {
   if (-not (Test-Path $cachedFf)) {
     $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
     $zip = Join-Path $cache "ffmpeg.zip"
-    Write-Host "  下载 ffmpeg 静态构建（约 80MB，仅首次）..."
+    Write-Host "  Downloading a static ffmpeg build (about 80MB, first run only)..."
     Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
     $tmp = Join-Path $cache "ff_extract"
     if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
@@ -210,12 +226,13 @@ try {
     elseif ($UseTar)   { New-Item -ItemType Directory -Force -Path $tmp | Out-Null; & tar.exe -xf "$zip" -C "$tmp" }
     else               { Expand-Archive -Path $zip -DestinationPath $tmp -Force }
     $found = Get-ChildItem $tmp -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
-    if (-not $found) { throw "解压后未找到 ffmpeg.exe" }
+    if (-not $found) { throw "ffmpeg.exe not found after extraction" }
     Copy-Item $found.FullName $cachedFf -Force
     Remove-Item $tmp -Recurse -Force; Remove-Item $zip -Force
   }
   Copy-Item $cachedFf $ffExe -Force
-  # FFmpeg 为 GPLv3 构建：随附完整许可文本 + 源代码声明（再分发义务）
+  # This FFmpeg is a GPLv3 build: ship the full license text + source offer
+  # (redistribution obligation)
   $gplCache = Join-Path $cache "COPYING.GPLv3.txt"
   if (-not (Test-Path $gplCache)) {
     Invoke-WebRequest -Uri "https://www.gnu.org/licenses/gpl-3.0.txt" -OutFile $gplCache -UseBasicParsing
@@ -223,32 +240,32 @@ try {
   Copy-Item $gplCache (Join-Path $ffDir "COPYING.GPLv3.txt") -Force
   Copy-Item (Join-Path $ProjectRoot "assets\packaging\ffmpeg-README-LICENSE.txt") `
             (Join-Path $ffDir "README-LICENSE.txt") -Force
-  Ok ("ffmpeg.exe + 许可(GPLv3) 已随包（{0} MB）" -f [math]::Round((Get-Item $ffExe).Length/1MB))
+  Ok ("ffmpeg.exe + GPLv3 license bundled ({0} MB)" -f [math]::Round((Get-Item $ffExe).Length/1MB))
 } catch {
-  Write-Warning "ffmpeg 准备失败：$($_.Exception.Message)；整合包仍可用，但语速≠1.0 将不生效。"
+  Write-Warning "ffmpeg setup failed: $($_.Exception.Message); the bundle still works, but speed != 1.0 will not take effect."
   if (Test-Path $ffDir) { Remove-Item $ffDir -Recurse -Force }
 }
 
-# ---- 7. 压缩为整合包 ---------------------------------------------------------
-Step 7 "压缩为整合包（耗时较长）"
+# ---- 7. Compress into the bundle archive -------------------------------------
+Step 7 "Compress into the bundle archive (slow)"
 $zipPath = Join-Path $Dist "$DistName.zip"
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 if ($SevenZip) {
   & $SevenZip a -tzip "$zipPath" "$Stage" -mx=5 | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw "7z 压缩失败" }
+  if ($LASTEXITCODE -ne 0) { throw "7z compression failed" }
 } elseif ($UseTar) {
   & tar.exe -c -a -f "$zipPath" -C "$Dist" "$DistName"
-  if ($LASTEXITCODE -ne 0) { throw "tar 压缩失败" }
+  if ($LASTEXITCODE -ne 0) { throw "tar compression failed" }
 } else {
-  Write-Warning "用 PowerShell 内置压缩，>4GB 较慢，请耐心 ..."
+  Write-Warning "Using PowerShell's built-in compression; >4GB is slow, please wait ..."
   Compress-Archive -Path $Stage -DestinationPath $zipPath -CompressionLevel Optimal
 }
 $zipGB = "{0:N2}" -f ((Get-Item $zipPath).Length / 1GB)
-Ok "已生成 $zipPath（$zipGB GB）"
+Ok "wrote $zipPath ($zipGB GB)"
 
-# ---- 完成 --------------------------------------------------------------------
-Write-Host "`n全部完成 ✅" -ForegroundColor Green
-Write-Host "  整合包目录：$Stage"
-Write-Host "  压缩包：    $zipPath  ($zipGB GB)"
-Write-Host "`n验收：把 zip 拷到一台【干净的 / 最好无 N 卡的】Windows，解压后双击「Start EasyVoice.bat」，"
-Write-Host "      首次会自动初始化(约 1 分钟) + 加载模型(约 30 秒)，随后自动打开浏览器即可用。"
+# ---- Done --------------------------------------------------------------------
+Write-Host "`nAll done." -ForegroundColor Green
+Write-Host "  Bundle directory: $Stage"
+Write-Host "  Archive:          $zipPath  ($zipGB GB)"
+Write-Host "`nAcceptance: copy the zip to a clean Windows machine (ideally without an NVIDIA GPU), extract it"
+Write-Host "            and double-click 'Start EasyVoice.bat'. First run: ~1 min init + ~30 s model load, then a browser opens."
