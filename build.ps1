@@ -18,11 +18,11 @@
    dist\EasyVoice-<Ver>.zip       ← 压缩包（托管/分发用）
 
  用法（在 base 环境的 PowerShell 7 里，于项目根目录执行）：
-     pwsh -File build.ps1 -Version v1.2.0
+     pwsh -File build.ps1 -Version v1.1.1
    -Version 决定产物目录名与 zip 名，发版时必须显式传：默认值写死在下面的 param 块里，
    漏传会产出与上一版同名的目录 / zip，直接覆盖 dist\ 里上一版的打包产物。
    其余可选参数：
-     pwsh -File build.ps1 -Version v1.2.0 -EnvName easyvoice -CondaRoot D:\miniconda3
+     pwsh -File build.ps1 -Version v1.1.1 -EnvName easyvoice -CondaRoot D:\miniconda3
 
  注意：
    - 需要先 `python app_main.py` 跑通过一次（确认 easyvoice 环境可用）。
@@ -33,7 +33,7 @@
 [CmdletBinding()]
 param(
   [string]$EnvName   = "easyvoice",
-  [string]$Version   = "v1.2.0",
+  [string]$Version   = "v1.1.1",
   [string]$CondaRoot = "$env:USERPROFILE\miniconda3",
   [string]$ModelId   = "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
   [ValidateSet("gpu","cpu")][string]$Variant = "gpu"

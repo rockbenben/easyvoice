@@ -81,8 +81,8 @@ easyvoice/
 `build.ps1` packs the validated conda env into an unzip-and-double-click bundle:
 
 ```powershell
-pwsh -File build.ps1 -Version v1.2.0                  # Full bundle: GPU/CPU auto, model bundled (~4.6 GB)
-pwsh -File build.ps1 -Version v1.2.0 -Variant cpu     # CPU lite: no CUDA, no model (~0.5 GB; model downloaded in-app on first launch)
+pwsh -File build.ps1 -Version v1.1.1                  # Full bundle: GPU/CPU auto, model bundled (~4.6 GB)
+pwsh -File build.ps1 -Version v1.1.1 -Variant cpu     # CPU lite: no CUDA, no model (~0.5 GB; model downloaded in-app on first launch)
 ```
 
 > ⚠️ **Always pass `-Version` when cutting a release.** The default is hardcoded in the `param` block of `build.ps1` and does not track the release. Omitting it produces a directory and zip named after whatever that default happens to be, overwriting an existing build in `dist/` and shipping mislabeled assets.

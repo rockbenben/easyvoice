@@ -81,8 +81,8 @@ easyvoice/
 用 `build.ps1` 把已验证的 conda 环境打成「解压双击即用」的整合包：
 
 ```powershell
-pwsh -File build.ps1 -Version v1.2.0                  # 完整大包：GPU/CPU 自适应、内置模型（约 4.6GB）
-pwsh -File build.ps1 -Version v1.2.0 -Variant cpu     # CPU 精简包：无 CUDA、不含模型（约 0.5GB；模型首启在工具内下载）
+pwsh -File build.ps1 -Version v1.1.1                  # 完整大包：GPU/CPU 自适应、内置模型（约 4.6GB）
+pwsh -File build.ps1 -Version v1.1.1 -Variant cpu     # CPU 精简包：无 CUDA、不含模型（约 0.5GB；模型首启在工具内下载）
 ```
 
 > ⚠️ **`-Version` 每次发版都要显式传**：默认值写死在 `build.ps1` 的 param 块里，不跟着 Release 走。漏传会产出与上一版同名的目录和 zip，直接覆盖 `dist/` 里的上一版产物，并发出版本号标错的分发包。
