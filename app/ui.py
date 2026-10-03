@@ -140,8 +140,8 @@ html, body, gradio-app{ background:var(--paper)!important; }
 .ev-lang a:hover{ color:#fff; background:rgba(255,255,255,.16);}
 html[data-uilang="zh"] .ev-lang .lang-zh,
 html[data-uilang="zh-Hant"] .ev-lang .lang-zhhant,
-html[data-uilang="en"] .ev-lang .lang-en{ background:#fff; color:var(--jade-d); font-weight:800;
-  box-shadow:0 1px 3px rgba(0,0,0,.2);}
+html[data-uilang="en"] .ev-lang .lang-en{ background:#fff!important; color:var(--jade-d)!important;
+  font-weight:800; box-shadow:0 1px 3px rgba(0,0,0,.2);}
 .ev-dot{ width:8px; height:8px; border-radius:50%;}
 .ev-dot.live{ background:#8AF0C4;}
 .ev-dot.idle{ background:#FFC56B;}
@@ -234,6 +234,14 @@ html[data-uilang="en"] .ev-lang .lang-en{ background:#fff; color:var(--jade-d); 
 .gradio-container .ev-vrow-del{ background:#FBECEA!important;
   border:1px solid #F0C9C0!important; border-radius:10px!important; padding:6px 8px!important;}
 .gradio-container .ev-vrow-del p{ margin:0!important; color:var(--ink)!important; font-size:14px!important;}
+/* 确认删除的「删除」按钮必须是红色 stop 语义（曾被 secondary 覆盖成白底黑字，误点方向反了） */
+.gradio-container .ev-vrow-del button.stop{ background:#C0392B!important;
+  border-color:#A93226!important; color:#fff!important;}
+.gradio-container .ev-vrow-del button.stop:hover{ background:#A93226!important;}
+/* 折叠箭头：收起朝下、展开朝上。Gradio 用内联 style 旋转 .icon(▼)，须 !important 压过；
+   收起态内联 rotate(90deg) 会显示成 ◀，展开态 0deg 显示 ▼——与直觉相反，故两态都钉死。 */
+.gradio-container .ev-acc .label-wrap .icon{ transform:rotate(0deg)!important;}
+.gradio-container .ev-acc .label-wrap.open .icon{ transform:rotate(180deg)!important;}
 
 /* ── 配音 preset quick bar (apply / save) + manager per-row summary ── */
 .gradio-container .ev-presetbar{ align-items:flex-end!important; gap:6px!important;
@@ -309,8 +317,9 @@ html[data-uilang="en"] .ev-lang .lang-en{ background:#fff; color:var(--jade-d); 
 .ev-footer .ev-more a{ color:var(--jade-d); text-decoration:none; font-weight:500;}
 .ev-footer .ev-more a:hover{ text-decoration:underline;}
 
-/* ── 退出条(命令行窗口退出不直观，界面给个明确出口) ─ */
-.ev-exitbar{ justify-content:flex-end!important; margin:14px 0 0!important;}
+/* ── 页脚行：GitHub/更多作品 与「退出」同排（退出不再孤悬右下角） ─ */
+.ev-footrow{ align-items:center!important; justify-content:space-between!important;
+  flex-wrap:wrap!important; margin:14px 0 0!important;}
 .gradio-container .ev-exit{ background:#FBECEA!important; border:1px solid #F0C9C0!important;
   color:#9B4A3C!important; font-weight:600!important; border-radius:10px!important; flex:none!important;}
 .gradio-container .ev-exit:hover{ background:#F6D9D3!important;}
@@ -429,8 +438,6 @@ def _build_i18n() -> gr.I18n:
         d["_eb_compose"] = _eyebrow(i18n.t(tb, "sec.compose"))
         d["_eb_voadd"]   = _eyebrow(i18n.t(tb, "voice.add_title"))
         d["_eb_vomng"]   = _eyebrow(i18n.t(tb, "voice.manage_title"))
-        d["_eb_psuse"]   = _eyebrow(i18n.t(tb, "preset.use_title"))
-        d["_eb_pssave"]  = _eyebrow(i18n.t(tb, "preset.save_title"))
         trans[loc] = d
     return gr.I18n(**trans)
 
@@ -535,6 +542,15 @@ def do_apply_style(style):
 
 _TOK_PER_SEC = 12.5   # Qwen3-TTS 12Hz：约 12.5 个音频 token / 秒
 _TOK_WARN = 8192      # 超过约 11 分钟 → 给"较慢/建议分段"提醒(qwen-tts 自身无此提示)
+_TOK_TIERS = (750, 2048, 3750, 7500, 22500, 65536)   # ≈1/3/5/10/30/87 分钟
+
+
+def _maxtok_choices(tb=None):
+    """最大生成长度 → 档位下拉（线性滑杆在 512–65536 区间左端挤成一团，微调困难）。
+    标签按 _TOK_PER_SEC 折算分钟，value 仍是 token 整数，下游 do_generate/持久化不变。"""
+    tb = tb or i18n.load("zh-Hans")
+    return [(i18n.t(tb, "adv.tok_est").replace("{m}", f"{(t / _TOK_PER_SEC) / 60:.0f}"), t)
+            for t in _TOK_TIERS]
 
 
 def do_tok_estimate(tokens, tb_lang="zh-Hans"):
@@ -724,10 +740,26 @@ _SUB_CC = "ev_sub_project"
 
 
 def _sub_table(project):
-    """工程态 → 状态表二维数组（# / 角色 / 文本 / 状态）。"""
+    """工程态 → 状态表二维数组（# / 角色 / 文本 / 状态）。状态列按工程语言映射为
+    用户词（pending/dirty 等内部枚举不得直达界面）；工程创建时记 loc，换语言=换会话。"""
     if not project:
         return []
-    return [[c["idx"] + 1, c["speaker"], c["text"], c["status"]] for c in project["cues"]]
+    tb = i18n.load(project.get("loc", "zh-Hans"))
+    return [[c["idx"] + 1, c["speaker"], c["text"],
+             i18n.t(tb, _ST_KEYS.get(c["status"], c["status"]))] for c in project["cues"]]
+
+
+_ST_KEYS = {"pending": "st.pending", "dirty": "st.dirty", "ok": "st.ok", "error": "st.error"}
+
+
+def _gen_btn(project):
+    """「生成全部」按钮文案：有待生成/已改动/失败条数时带计数徽标，清零后回短标签。
+    总是带 interactive=True——busy 帧禁用后靠各收尾帧复位（漏一帧按钮就永久卡死）。"""
+    tb = i18n.load((project or {}).get("loc", "zh-Hans"))
+    n = sum(1 for c in project["cues"] if c["status"] != "ok") if project else 0
+    if not n:
+        return gr.update(value=i18n.t(tb, "sub.gen_all"), interactive=True)
+    return gr.update(value=i18n.t(tb, "sub.gen_all_n").replace("{n}", str(n)), interactive=True)
 
 
 def do_sub_parse(file_path, lang, voice_id, detect_speakers=True, request: gr.Request = None):
@@ -737,17 +769,25 @@ def do_sub_parse(file_path, lang, voice_id, detect_speakers=True, request: gr.Re
     project = _dub.build_project(content, lang, voice_id, detect_speakers=detect_speakers)
     if not project["cues"]:
         raise gr.Error(i18n.t(_req_tb(request), "err.no_cues"))
+    project["loc"] = _lang_from_request(request)          # 状态列/按钮计数按此语言本地化
+    tb = _req_tb(request)
     return (project, gr.update(value=_sub_table(project)),
             None,                                              # 重置选中行(避免对短字幕用旧 idx 触发 KeyError)
-            gr.update(value=""),                               # 清空编辑文本
+            gr.update(value="", placeholder=i18n.t(tb, "sub.select_hint")),  # 清空编辑文本
             gr.update(choices=list(project["speakers"].keys()), value=None),  # 重置角色下拉
-            None)                                              # 清空试听
+            None,                                              # 清空试听
+            _gen_btn(project),                                 # 生成全部(带待生成计数)
+            gr.update(interactive=False),                      # 保存/重录：等点选行才激活(U10)
+            gr.update(interactive=False),
+            gr.update(visible=True),                           # 第②段：角色配音+状态表+编辑面板
+            gr.update(visible=True),
+            gr.update(visible=False))                          # 第③段：合成导出区，生成过内容后才出现(U2)
 
 
 def do_sub_select(project, evt: gr.SelectData, request: gr.Request = None):
-    """点选状态表某行 → 载入编辑面板（文本 / 角色 / 试听）。"""
+    """点选状态表某行 → 载入编辑面板（文本 / 角色 / 试听），并激活保存/重录。"""
     if not project:
-        return gr.update(), gr.update(), gr.update(), None
+        return (gr.update(), gr.update(), gr.update(), None, gr.update(), gr.update())
     # v1: 表格行序 == cue["idx"]（v1 不支持删行/重排，故二者一致；若将来支持需改为显式行→idx 映射）
     idx = evt.index[0] if evt and evt.index else 0
     c = _dub._cue(project, idx)
@@ -755,24 +795,26 @@ def do_sub_select(project, evt: gr.SelectData, request: gr.Request = None):
     return (idx,
             gr.update(value=c["text"]),
             gr.update(choices=speakers, value=c["speaker"]),
-            c.get("audio_path"))
+            c.get("audio_path"),
+            gr.update(interactive=True),
+            gr.update(interactive=True))
 
 
 def _role_change(project, speaker, voice_id):
     _dub.set_speaker_voice(project, speaker, voice_id)
-    return project, gr.update(value=_sub_table(project))
+    return project, gr.update(value=_sub_table(project)), _gen_btn(project)
 
 
 def do_sub_edit_text(project, idx, text, speaker, request: gr.Request = None):
     """保存编辑面板的文本/角色改动（标脏，不立即重生）。"""
     if project is None:
-        return project, gr.update()
+        return project, gr.update(), gr.update()
     if idx is None:
         raise gr.Error(i18n.t(_req_tb(request), "sub.select_hint"))
     _dub.set_cue_text(project, int(idx), text)
     if speaker:
         _dub.set_cue_speaker(project, int(idx), speaker)
-    return project, gr.update(value=_sub_table(project))
+    return project, gr.update(value=_sub_table(project)), _gen_btn(project)
 
 
 def do_sub_reroll(project, idx, model_pref="auto", request: gr.Request = None):
@@ -785,25 +827,27 @@ def do_sub_reroll(project, idx, model_pref="auto", request: gr.Request = None):
     project.setdefault("params", {})["model"] = model_pref
     _dub.reroll_cue(project, int(idx))
     c = _dub._cue(project, int(idx))
-    return project, gr.update(value=_sub_table(project)), c.get("audio_path")
+    return (project, gr.update(value=_sub_table(project)), c.get("audio_path"),
+            _gen_btn(project))
 
 
 def _run_sub_gen_all(project, model_pref="auto", request: gr.Request = None, progress=gr.Progress()):
-    """生成全部（生成器）：禁用→逐条生成报进度→复位；出错也复位。"""
+    """生成全部（生成器）：禁用→逐条生成报进度→复位；出错也复位。
+    全部生成成功后揭开第③段「合成导出」（渐进式，U2）。"""
     tb = _req_tb(request)
     busy = gr.update(value=i18n.t(tb, "btn.generating"), interactive=False)
-    idle = gr.update(value=i18n.t(tb, "sub.gen_all"), interactive=True)
     if project is None:
         raise gr.Error(i18n.t(tb, "err.no_project"))
-    yield busy, gr.update(), project
+    yield busy, gr.update(), project, gr.update()
     try:
         project.setdefault("params", {})["model"] = model_pref
         _dub.generate_all(project,
                           progress_cb=_mk_progress_cb(progress, tb, "prog.cues"))
     except Exception:
-        yield idle, gr.update(), project
+        yield _gen_btn(project), gr.update(), project, gr.update()
         raise
-    yield idle, gr.update(value=_sub_table(project)), project
+    yield (_gen_btn(project), gr.update(value=_sub_table(project)), project,
+           gr.update(visible=True))
 
 
 def _run_sub_export(project, video_path, mux_mode, request: gr.Request = None,
@@ -904,16 +948,19 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                 rep_pen = gr.Slider(1.0, 2.0, value=1.0, step=0.05,
                                                     label=I18N("adv.rep_pen"),
                                                     info=I18N("adv.rep_pen_info"))
-                                max_tokens = gr.Slider(512, 65536, value=2048, step=256,
-                                                       label=I18N("adv.max_tokens"),
-                                                       info=I18N("adv.max_tokens_info"))
+                                max_tokens = gr.Dropdown(_maxtok_choices(tb), value=2048,
+                                                         label=I18N("adv.max_tokens"),
+                                                         info=I18N("adv.max_tokens_info"))
                                 tok_est = gr.Markdown(do_tok_estimate(2048, lang),
                                                       elem_classes=["ev-tokest"])
                                 seed_in = gr.Number(value=0, precision=0, minimum=0,
                                                     label=I18N("adv.seed"), info=I18N("adv.seed_info"))
-                            dub_pname = gr.Textbox(label=I18N("preset.name"),
-                                                   placeholder=I18N("preset.name_ph"))
-                            dub_save = gr.Button(I18N("preset.save"))
+                            # 保存方案是低频动作：折进次级折叠，缩短左列（U3）
+                            with gr.Accordion(I18N("preset.save_title"), open=False,
+                                              elem_classes=["ev-acc"]) as save_acc:
+                                dub_pname = gr.Textbox(label=I18N("preset.name"),
+                                                       placeholder=I18N("preset.name_ph"))
+                                dub_save = gr.Button(I18N("preset.save"))
                     with gr.Column(scale=3, min_width=360):
                         with gr.Group(elem_classes=["ev-card"]):
                             eb_compose = gr.HTML(I18N("_eb_compose"))
@@ -960,12 +1007,14 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                             _bump = gr.State(0)          # +1 触发整列表重渲染
                             _pending = gr.State(None)    # 待二次确认删除的音色 id
                             _vediting = gr.State(None)   # 正在编辑的音色 id
+                            _vopen = gr.State(None)      # 正在展开试听的音色 id（同一时刻最多一行）
                             _vloc = gr.State("zh-Hans")  # 行内文案语言(load 时由 relabel 写入)
 
-                            @gr.render(inputs=[_bump, _pending, _vediting, _vloc],
+                            @gr.render(inputs=[_bump, _pending, _vediting, _vopen, _vloc],
                                        triggers=[tab_voices.select, _bump.change,
-                                                 _pending.change, _vediting.change])
-                            def _render_voices(_b, pending, editing, vloc):
+                                                 _pending.change, _vediting.change,
+                                                 _vopen.change])
+                            def _render_voices(_b, pending, editing, opened, vloc):
                                 vtb = i18n.load(vloc or "zh-Hans")
                                 voices = voice_library.list_voices()
                                 if not voices:
@@ -997,16 +1046,23 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                         sv.click(lambda nm_, b, _id=vid: do_voice_save_edit(_id, nm_, b),
                                                  [e_nm, _bump], [_bump, _vediting, voice_dd])
                                         cx.click(lambda: None, None, [_vediting])
-                                    else:                                    # 显示态：名字(文本) + ✎/调序/删除
+                                    else:                                    # 显示态：名字 + ▶试听 + ✎/调序/删除
                                         with gr.Row(elem_classes=["ev-vrow"]):
                                             gr.Markdown(v["name"], elem_classes=["ev-vname"])
+                                            pl = gr.Button("▼" if vid == opened else "▶",
+                                                           scale=0, min_width=44,
+                                                           elem_classes=["ev-vrow-play"])
                                             ed = gr.Button("✎", scale=0, min_width=44)
                                             up = gr.Button("↑", scale=0, min_width=44, interactive=(i > 0))
                                             dn = gr.Button("↓", scale=0, min_width=44, interactive=(i < n - 1))
                                             dl = gr.Button("🗑", scale=0, min_width=44)
+                                        # 播放器默认收起，点 ▶ 才展开本行（U1：整页从 ~1200px 缩到 ~300px）
                                         gr.Audio(voice_library.get_audio_path(vid), interactive=False,
                                                  show_label=False, container=False,
+                                                 visible=(vid == opened),
                                                  elem_classes=["ev-audio", "ev-vaudio"])
+                                        pl.click(lambda cur, _id=vid: None if cur == _id else _id,
+                                                 [_vopen], [_vopen])
                                         ed.click(lambda _id=vid: _id, None, [_vediting])
                                         up.click(lambda b, _id=vid: do_voice_move(_id, -1, b),
                                                  [_bump], [_bump, voice_dd])
@@ -1079,71 +1135,83 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                 info=I18N("sub.detect_speakers_info"))
                             sub_parse = gr.Button(I18N("sub.parse"), variant="primary")
                             sub_preview = gr.Markdown("", elem_classes=["ev-readout"])
-                            roles_eb = gr.Markdown(I18N("sub.roles_title"))
-                            @gr.render(inputs=[_sub_proj, _vloc])
-                            def _render_roles(project, vloc):
-                                if not project:
-                                    return
-                                for spk in project["speakers"].keys():
-                                    dd = gr.Dropdown(_voice_choices(),
-                                                     value=project["speakers"].get(spk),
-                                                     label=spk)
-                                    dd.change(lambda vid, p, _spk=spk: _role_change(p, _spk, vid),
-                                              [dd, _sub_proj], [_sub_proj, sub_table],
-                                              show_progress="hidden", concurrency_id=_SUB_CC)
+                            with gr.Group(visible=False, elem_classes=["ev-stage"]) as sub_roles_grp:
+                                roles_eb = gr.Markdown(I18N("sub.roles_title"))
+                                @gr.render(inputs=[_sub_proj, _vloc])
+                                def _render_roles(project, vloc):
+                                    if not project:
+                                        return
+                                    for spk in project["speakers"].keys():
+                                        dd = gr.Dropdown(_voice_choices(),
+                                                         value=project["speakers"].get(spk),
+                                                         label=spk)
+                                        dd.change(_role_change,
+                                                  [dd, _sub_proj], [_sub_proj, sub_table, sub_gen],
+                                                  show_progress="hidden", concurrency_id=_SUB_CC)
                     with gr.Column(scale=3, min_width=360):
                         with gr.Group(elem_classes=["ev-card"]):
-                            sub_table = gr.Dataframe(
-                                headers=["#", I18N("sub.col_speaker"),
-                                         I18N("sub.col_text"), I18N("sub.col_status")],
-                                datatype=["number", "str", "str", "str"],
-                                interactive=False, wrap=True, elem_classes=["ev-subtable"])
-                            sub_gen = gr.Button(I18N("sub.gen_all"), variant="primary",
-                                                elem_id="ev-subgen")
-                            with gr.Group(elem_classes=["ev-card"]):
-                                edit_eb = gr.Markdown(I18N("sub.edit_title"))
-                                edit_text = gr.Textbox(label=I18N("sub.edit_text"), lines=2)
-                                edit_speaker = gr.Dropdown([], label=I18N("sub.edit_speaker"),
-                                                           allow_custom_value=True)
-                                with gr.Row():
-                                    edit_apply = gr.Button(I18N("sub.edit_apply"))
-                                    edit_reroll = gr.Button(I18N("sub.reroll"))
-                                edit_audio = gr.Audio(label=I18N("sub.preview"),
-                                                      interactive=False, elem_classes=["ev-audio"])
-                            sub_video = gr.File(label=I18N("sub.video"), file_count="single",
-                                                type="filepath")
-                            sub_mux = gr.Radio(choices=[(I18N("sub.mux_replace"), "replace"),
-                                                        (I18N("sub.mux_keep"), "keep")],
-                                               value="replace", label=I18N("sub.mux_mode"),
-                                               elem_classes=["ev-style"])
-                            sub_export = gr.Button(I18N("sub.export"), variant="primary")
-                            sub_audio = gr.Audio(label=I18N("field.result"), elem_classes=["ev-audio"])
-                            sub_srt = gr.File(label=I18N("sub.srt"))
-                            sub_video_out = gr.Video(label=I18N("sub.video_out"))
+                            with gr.Group(visible=False, elem_classes=["ev-stage"]) as sub_work_grp:
+                                sub_table = gr.Dataframe(
+                                    headers=["#", i18n.t(tb, "sub.col_speaker"),
+                                             i18n.t(tb, "sub.col_text"),
+                                             i18n.t(tb, "sub.col_status")],
+                                    datatype=["number", "str", "str", "str"],
+                                    interactive=False, wrap=True, elem_classes=["ev-subtable"])
+                                sub_gen = gr.Button(I18N("sub.gen_all"), variant="primary",
+                                                    elem_id="ev-subgen")
+                                with gr.Group(elem_classes=["ev-card"]):
+                                    edit_eb = gr.Markdown(I18N("sub.edit_title"))
+                                    edit_text = gr.Textbox(label=I18N("sub.edit_text"), lines=2)
+                                    edit_speaker = gr.Dropdown([], label=I18N("sub.edit_speaker"),
+                                                               allow_custom_value=True)
+                                    with gr.Row():
+                                        edit_apply = gr.Button(I18N("sub.edit_apply"),
+                                                               interactive=False)
+                                        edit_reroll = gr.Button(I18N("sub.reroll"),
+                                                                interactive=False)
+                                    edit_audio = gr.Audio(label=I18N("sub.preview"),
+                                                          interactive=False, elem_classes=["ev-audio"])
+                            with gr.Group(visible=False, elem_classes=["ev-stage"]) as sub_out_grp:
+                                sub_video = gr.File(label=I18N("sub.video"), file_count="single",
+                                                    type="filepath")
+                                sub_mux = gr.Radio(choices=[(I18N("sub.mux_replace"), "replace"),
+                                                            (I18N("sub.mux_keep"), "keep")],
+                                                   value="replace", label=I18N("sub.mux_mode"),
+                                                   elem_classes=["ev-style"])
+                                sub_export = gr.Button(I18N("sub.export"), variant="primary")
+                                sub_audio = gr.Audio(label=I18N("field.result"), elem_classes=["ev-audio"])
+                                sub_srt = gr.File(label=I18N("sub.srt"))
+                                sub_video_out = gr.Video(label=I18N("sub.video_out"))
                 sub_file.change(do_subtitle_preview, sub_file, sub_preview, show_progress="hidden")
                 tab_subtitle.select(lambda: gr.update(choices=_voice_choices()), None, sub_voice,
                                     show_progress="hidden")
                 sub_parse.click(do_sub_parse, [sub_file, sub_lang, sub_voice, sub_detect_spk],
-                                [_sub_proj, sub_table, _sub_sel, edit_text, edit_speaker, edit_audio],
+                                [_sub_proj, sub_table, _sub_sel, edit_text, edit_speaker,
+                                 edit_audio, sub_gen, edit_apply, edit_reroll,
+                                 sub_roles_grp, sub_work_grp, sub_out_grp],
                                 concurrency_id=_SUB_CC)
                 sub_table.select(do_sub_select, [_sub_proj],
-                                 [_sub_sel, edit_text, edit_speaker, edit_audio])
+                                 [_sub_sel, edit_text, edit_speaker, edit_audio,
+                                  edit_apply, edit_reroll])
                 edit_apply.click(do_sub_edit_text,
                                  [_sub_proj, _sub_sel, edit_text, edit_speaker],
-                                 [_sub_proj, sub_table], concurrency_id=_SUB_CC)
+                                 [_sub_proj, sub_table, sub_gen], concurrency_id=_SUB_CC)
                 edit_reroll.click(do_sub_reroll, [_sub_proj, _sub_sel, sub_model_radio],
-                                  [_sub_proj, sub_table, edit_audio], concurrency_id=_SUB_CC)
+                                  [_sub_proj, sub_table, edit_audio, sub_gen],
+                                  concurrency_id=_SUB_CC)
                 sub_gen.click(_run_sub_gen_all, [_sub_proj, sub_model_radio],
-                              [sub_gen, sub_table, _sub_proj], concurrency_id=_SUB_CC)
+                              [sub_gen, sub_table, _sub_proj, sub_out_grp],
+                              concurrency_id=_SUB_CC)
                 sub_model_radio.change(do_model_hint, sub_model_radio, None, show_progress="hidden")
                 sub_export.click(_run_sub_export, [_sub_proj, sub_video, sub_mux],
                                  [sub_export, sub_audio, sub_srt, sub_video_out],
                                  concurrency_id=_SUB_CC)
-        with gr.Row(elem_classes=["ev-exitbar"]):
+        # 页脚行：GitHub/更多作品 与「退出」同排（U4：退出不再孤悬右下角）
+        with gr.Row(elem_classes=["ev-footrow"]):
+            footer = gr.HTML(_footer_html(lang))
             exit_btn = gr.Button(I18N("app.exit"), scale=0, min_width=128,
                                  elem_classes=["ev-exit"])
         exit_note = gr.Markdown("", elem_classes=["ev-exit-note"])
-        footer = gr.HTML(_footer_html(lang))
 
         # ── 界面语言：手动切换(?__lang=)或浏览器自动，在 load 时服务端整体重排 ──
         # gr.I18n 运行时无法改 locale，故用确定性的服务端 relabel 覆盖全部组件（含 Tab 标签）。
@@ -1177,7 +1245,9 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 top_p: gr.update(label=L("adv.top_p"), info=L("adv.top_p_info")),
                 top_k: gr.update(label=L("adv.top_k"), info=L("adv.top_k_info")),
                 rep_pen: gr.update(label=L("adv.rep_pen"), info=L("adv.rep_pen_info")),
-                max_tokens: gr.update(label=L("adv.max_tokens"), info=L("adv.max_tokens_info")),
+                max_tokens: gr.update(label=L("adv.max_tokens"), info=L("adv.max_tokens_info"),
+                                      choices=_maxtok_choices(t)),
+                save_acc: gr.update(label=L("preset.save_title")),
                 tok_est: gr.update(value=do_tok_estimate(2048, loc)),
                 seed_in: gr.update(label=L("adv.seed"), info=L("adv.seed_info")),
                 text_in: gr.update(label=L("field.text"), placeholder=L("field.text_ph")),
@@ -1250,6 +1320,9 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 v = st.get(k)
                 if v is None or (k == "voice" and v not in valid):   # 缺省 / 上次音色已删 → 不动
                     ups.append(gr.update())
+                elif k == "max_tokens":
+                    # 旧版滑杆可存出档位外的值 → 吸附到最近档，避免 Dropdown 收到未知 value
+                    ups.append(gr.update(value=min(_TOK_TIERS, key=lambda t: abs(t - int(v)))))
                 else:
                     ups.append(gr.update(value=v))
             return ups

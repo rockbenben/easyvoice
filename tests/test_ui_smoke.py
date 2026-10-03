@@ -329,14 +329,18 @@ def test_run_generate_resets_button_on_error(monkeypatch, tmp_path):
 
 
 def test_subtitle_dub_helpers_build_table(monkeypatch, tmp_path):
-    from app import dubbing_project as dp, ui
+    from app import dubbing_project as dp, ui, i18n
     monkeypatch.setattr(dp.config, "OUTPUTS_DIR", tmp_path)
     srt = ("1\n00:00:01,000 --> 00:00:02,000\n张三：你好\n\n"
            "2\n00:00:03,000 --> 00:00:04,000\n李四：还行\n")
     proj = dp.build_project(srt, "chinese", "v0")
     rows = ui._sub_table(proj)
-    assert rows[0] == [1, "张三", "你好", "pending"]
+    tb = i18n.load("zh-Hans")
+    assert rows[0] == [1, "张三", "你好", i18n.t(tb, "st.pending")]   # 状态列必须是用户词
     assert rows[1][1] == "李四"
+    # 内部枚举不得直达界面（B2 回归钉）
+    for leak in ("pending", "dirty", "ok", "error"):
+        assert all(leak != r[3] for r in rows)
 
 
 def test_build_ui_with_subtitle_tab_constructs():
@@ -353,20 +357,23 @@ def test_edit_text_without_selection_errors(monkeypatch, tmp_path):
     with pytest.raises(gr.Error):
         ui.do_sub_edit_text(proj, None, "x", None)        # 未选行 → 友好报错
     # project 为 None 时静默返回，不报错
-    out, _ = ui.do_sub_edit_text(None, None, "x", None)
+    out, _, _ = ui.do_sub_edit_text(None, None, "x", None)
     assert out is None
 
 
 def test_role_change_updates_voice_and_table(monkeypatch, tmp_path):
-    from app import dubbing_project as dp, ui
+    from app import dubbing_project as dp, ui, i18n
     monkeypatch.setattr(dp.config, "OUTPUTS_DIR", tmp_path)
     srt = ("1\n00:00:01,000 --> 00:00:02,000\n张三：你好\n\n"
            "2\n00:00:03,000 --> 00:00:04,000\n李四：还行\n")
     proj = dp.build_project(srt, "chinese", "v0")
-    out_proj, table_update = ui._role_change(proj, "张三", "v9")
+    out_proj, table_update, gen_update = ui._role_change(proj, "张三", "v9")
     assert out_proj["speakers"]["张三"] == "v9"
-    # 张三 the cue (row 0) is now dirty in the refreshed table
-    assert table_update["value"][0][3] == "dirty"
+    # 张三 the cue (row 0) is now dirty in the refreshed table — 状态列为本地化用户词
+    tb = i18n.load("zh-Hans")
+    assert table_update["value"][0][3] == i18n.t(tb, "st.dirty")
+    # 生成按钮带待生成计数（此处 2 条：1 dirty + 1 pending）
+    assert "2" in gen_update["value"]
 
 
 def test_model_choices_two_tiers():
