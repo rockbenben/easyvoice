@@ -104,10 +104,13 @@ def test_do_subtitle_preview_warns_when_cues_dropped(monkeypatch, tmp_path):
     f = tmp_path / "s.srt"
     f.write_text("1\n99:00:00,000 --> 99:00:05,000\nA\n\n"
                  "2\n00:00:01,000 --> 00:00:02,000\nB\n", encoding="utf-8")
-    assert "已忽略" in ui.do_subtitle_preview(str(f))          # request=None → 简体
+    upd = ui.do_subtitle_preview(str(f))                   # request=None → 简体
+    assert "已忽略" in upd["value"]
+    assert upd["visible"] is True                          # 有内容才现身（C1）
     ok = tmp_path / "ok.srt"
     ok.write_text("1\n00:00:01,000 --> 00:00:02,000\nB\n", encoding="utf-8")
-    assert "已忽略" not in ui.do_subtitle_preview(str(ok))
+    assert "已忽略" not in ui.do_subtitle_preview(str(ok))["value"]
+    assert ui.do_subtitle_preview(None)["visible"] is False  # 无文件 → 不留空壳条
 
 
 def test_do_add_voice_resets_capture_after_save(monkeypatch, tmp_path):
@@ -251,6 +254,24 @@ def test_do_preset_summary_empty_name(monkeypatch, tmp_path):
     from app import ui
     assert ui.do_preset_summary("") == ""
     assert ui.do_preset_summary(None) == ""
+
+
+def test_do_preset_summary_en_punctuation(monkeypatch, tmp_path):
+    """英文界面的方案摘要不得带全角「：」「｜」（batch2 C4 证人）。"""
+    from app import ui, presets, voice_library, config
+    monkeypatch.setattr(config, "VOICES_DIR", tmp_path / "v")
+    monkeypatch.setattr(presets, "get_preset", lambda name: {
+        "lang": "english", "voice_id": "abc12345",
+        "temperature": 0.9, "top_p": 0.9, "speed": 1.0,
+    })
+    monkeypatch.setattr(voice_library, "list_voices", lambda: [
+        {"id": "abc12345", "name": "Bright Female", "audio": "abc12345.wav"},
+    ])
+    en = ui.do_preset_summary("p", "en")
+    for wide in ("：", "｜", "　"):
+        assert wide not in en, f"fullwidth {wide!r} leaked into en summary: {en}"
+    zh = ui.do_preset_summary("p", "zh-Hans")
+    assert "｜" in zh   # 中文保持全角分隔（反向钉，防一刀切）
 
 
 def test_do_preset_summary_missing_preset(monkeypatch, tmp_path):

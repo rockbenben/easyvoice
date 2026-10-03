@@ -9,3 +9,4 @@ __pycache__/
 dist/
 runtime.zip
 ffmpeg/
+.qoder-credits/

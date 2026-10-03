@@ -93,7 +93,7 @@
   "tab.subtitle": "字幕配音",
   "sub.guide": "三步：① 上傳字幕並解析 ② 給角色配音色、逐條生成 ③ 合成導出（可合進原視頻）。",
   "sub.file": "字幕檔（SRT / VTT / LRC）",
-  "sub.parsed": "已解析 **{n}** 條字幕 · 涵蓋約 **{m}** 分鐘",
+  "sub.parsed": "已解析 **{n}** 條字幕 · 時長約 **{m}** 分鐘",
   "sub.dropped": "已忽略 **{d}** 條超出 6 小時上限的字幕",
   "err.need_subtitle": "請先上傳字幕檔",
   "err.no_cues": "沒解析到字幕，請確認是 SRT / VTT / LRC 格式",
@@ -101,7 +101,6 @@
   "btn.generating": "⏳ 生成中…",
   "prog.chars": "已生成 {d}/{t} 字",
   "prog.cues": "已合成 {d}/{t} 條字幕",
-  "sub.roles_title": "角色配音",
   "sub.detect_speakers": "字幕裡帶「名字：台詞」前綴",
   "sub.detect_speakers_info": "按前綴自動拆分角色；不確定就關掉，全部行用預設音色（正文含冒號時不易誤拆）。",
   "sub.parse": "解析字幕",
@@ -109,7 +108,7 @@
   "sub.col_speaker": "角色",
   "sub.col_text": "文本",
   "sub.col_status": "狀態",
-  "sub.edit_title": "編輯選中條",
+  "sub.edit_title": "編輯選中的字幕條",
   "sub.edit_text": "文本",
   "sub.edit_speaker": "角色",
   "sub.preview": "試聽",
@@ -134,5 +133,11 @@
   "st.dirty": "已改動",
   "st.ok": "完成",
   "st.error": "失敗",
-  "sub.gen_all_n": "生成全部（{n} 條待生成）"
+  "sub.gen_all_n": "生成全部（{n} 條待生成）",
+  "sub.step1": "上傳字幕並解析",
+  "sub.step2": "角色配音 · 逐條生成",
+  "sub.step3": "合成導出",
+  "field.text_count": "{n} 字 · 預計約 {s} 秒",
+  "field.text_over": "超出目前檔位（≈{m} 分鐘），建議升檔或分段",
+  "footer.more": "更多作品"
 }

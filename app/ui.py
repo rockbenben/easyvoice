@@ -308,8 +308,7 @@ html[data-uilang="en"] .ev-lang .lang-en{ background:#fff!important; color:var(-
 
 /* ── footer: GitHub + author's other apps ──────────────── */
 .ev-footer{ display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:8px 18px;
-  margin:30px auto 6px; padding:18px 16px 4px; font-size:13.5px; color:var(--muted);
-  border-top:1px solid var(--line);}
+  margin:0 auto; padding:0 16px; font-size:13.5px; color:var(--muted);}
 .ev-footer .ev-gh{ display:inline-flex; align-items:center; gap:6px; color:var(--jade-d);
   font-weight:600; text-decoration:none;}
 .ev-footer .ev-gh:hover{ text-decoration:underline;}
@@ -317,9 +316,28 @@ html[data-uilang="en"] .ev-lang .lang-en{ background:#fff!important; color:var(-
 .ev-footer .ev-more a{ color:var(--jade-d); text-decoration:none; font-weight:500;}
 .ev-footer .ev-more a:hover{ text-decoration:underline;}
 
-/* ── 页脚行：GitHub/更多作品 与「退出」同排（退出不再孤悬右下角） ─ */
+/* ── 页脚行：GitHub/更多作品 与「退出」同排（退出不再孤悬右下角）；
+   分隔线画在本行、横跨整宽，退出与文字同基线（E5） ─ */
 .ev-footrow{ align-items:center!important; justify-content:space-between!important;
-  flex-wrap:wrap!important; margin:14px 0 0!important;}
+  flex-wrap:wrap!important; margin:30px 0 0!important;
+  border-top:1px solid var(--line); padding-top:16px;}
+
+/* ── 只读字幕表：去掉 Gradio 的可编辑错觉 chrome（C2/C3）。
+   绿框实为选中格内层 span.text 的 jade inset shadow（computed 取证），手柄是
+   .selection-button；剥掉后选中态只由整行淡色高亮表意。 ── */
+.gradio-container .ev-subtable .cell-selected .text{ box-shadow:none!important;}
+.gradio-container .ev-subtable .cell-selected:focus-visible{ outline:none!important;}
+.gradio-container .ev-subtable .cell-selected button{ display:none!important;}
+.gradio-container .ev-subtable .toolbar{ display:none!important;}
+
+/* ── 行内试听播放器：只为听一遍，藏倍速/快退/快进（E4） ── */
+.gradio-container .ev-vaudio button.playback,
+.gradio-container .ev-vaudio button.rewind,
+.gradio-container .ev-vaudio button.skip{ display:none!important;}
+
+/* ── 音频组件标签统一放框外上方，与其它输入一致（W1） ── */
+.gradio-container .ev-audio [data-testid="block-label"]{ position:static!important;
+  transform:none!important; background:transparent!important; padding:0 0 6px 2px!important;}
 .gradio-container .ev-exit{ background:#FBECEA!important; border:1px solid #F0C9C0!important;
   color:#9B4A3C!important; font-weight:600!important; border-radius:10px!important; flex:none!important;}
 .gradio-container .ev-exit:hover{ background:#F6D9D3!important;}
@@ -404,7 +422,8 @@ _GH_SVG = (
 
 def _footer_html(loc="zh-Hans"):
     idx = 2 if loc == "en" else (1 if loc == "zh-Hant" else 0)
-    label = "More by me" if loc == "en" else "更多作品"
+    tb = i18n.load(loc)
+    label = i18n.t(tb, "footer.more")
     sep = ":&nbsp;" if loc == "en" else "："
     apps = " · ".join(
         f'<a href="{a[3]}" target="_blank" rel="noopener">{a[idx]}</a>' for a in _MORE_APPS
@@ -438,6 +457,9 @@ def _build_i18n() -> gr.I18n:
         d["_eb_compose"] = _eyebrow(i18n.t(tb, "sec.compose"))
         d["_eb_voadd"]   = _eyebrow(i18n.t(tb, "voice.add_title"))
         d["_eb_vomng"]   = _eyebrow(i18n.t(tb, "voice.manage_title"))
+        d["_eb_sub1"]    = _eyebrow("① " + i18n.t(tb, "sub.step1"))
+        d["_eb_sub2"]    = _eyebrow("② " + i18n.t(tb, "sub.step2"))
+        d["_eb_sub3"]    = _eyebrow("③ " + i18n.t(tb, "sub.step3"))
         trans[loc] = d
     return gr.I18n(**trans)
 
@@ -568,6 +590,24 @@ def _loc_tok_estimate(tokens, request: gr.Request):
     return do_tok_estimate(tokens, _lang_from_request(request))
 
 
+_CPS = 4.0   # 中文 TTS 粗估语速（字/秒）；只求量级正确的前置反馈，不承诺精确
+
+
+def do_text_count(text, max_tokens, request: gr.Request = None):
+    """输入文本的实时字数 + 预计时长；超出当前「最大生成长度」档位时变红提示。"""
+    tb = _req_tb(request)
+    n = len((text or "").strip())
+    if not n:
+        return gr.update(visible=False)
+    secs = n / _CPS
+    msg = i18n.t(tb, "field.text_count").replace("{n}", str(n)).replace("{s}", f"{secs:.0f}")
+    cap_sec = float(max_tokens or 2048) / _TOK_PER_SEC
+    if secs > cap_sec:
+        msg += " · " + i18n.t(tb, "field.text_over").replace("{m}", f"{cap_sec / 60:.0f}")
+        return gr.update(value="⚠️ " + msg, visible=True)
+    return gr.update(value=msg, visible=True)
+
+
 def do_add_voice(name, ref_path, bump=0, request: gr.Request = None):
     if not name or not name.strip():
         raise gr.Error(i18n.t(_req_tb(request), "err.need_voice_name"))
@@ -667,11 +707,15 @@ def do_preset_summary(name, tb_lang="zh-Hans"):
     stylekey = _temp_to_style_key(p.get("temperature", 0.9))
     slabel = i18n.t(tb, "style." + stylekey)
     speed = p.get("speed", 1.0)
+    # 标点随界面语言：英文界面不配全角「：」「｜」（C4）
+    en = tb_lang == "en"
+    colon = ": " if en else "："
+    sep = " · " if en else "　｜　"
     return (
-        f"**{i18n.t(tb, 'summary.lang')}**：{llabel}　｜　"
-        f"**{i18n.t(tb, 'summary.voice')}**：{vname}　｜　"
-        f"**{i18n.t(tb, 'summary.style')}**：{slabel}　｜　"
-        f"**{i18n.t(tb, 'summary.speed')}**：{speed}×"
+        f"**{i18n.t(tb, 'summary.lang')}**{colon}{llabel}{sep}"
+        f"**{i18n.t(tb, 'summary.voice')}**{colon}{vname}{sep}"
+        f"**{i18n.t(tb, 'summary.style')}**{colon}{slabel}{sep}"
+        f"**{i18n.t(tb, 'summary.speed')}**{colon}{speed}×"
     )
 
 
@@ -781,7 +825,9 @@ def do_sub_parse(file_path, lang, voice_id, detect_speakers=True, request: gr.Re
             gr.update(interactive=False),
             gr.update(visible=True),                           # 第②段：角色配音+状态表+编辑面板
             gr.update(visible=True),
-            gr.update(visible=False))                          # 第③段：合成导出区，生成过内容后才出现(U2)
+            gr.update(visible=False),                          # 第③段：合成导出区，生成过内容后才出现(U2)
+            gr.update(visible=True),                           # 右列整卡随 stage② 出现（C1 空壳条）
+            gr.update(visible=True))                           # 解析摘要条有内容才现身（C1）
 
 
 def do_sub_select(project, evt: gr.SelectData, request: gr.Request = None):
@@ -881,20 +927,20 @@ def _run_sub_export(project, video_path, mux_mode, request: gr.Request = None,
 
 def do_subtitle_preview(file_path, request: gr.Request = None):
     if not file_path:
-        return ""
+        return gr.update(visible=False)
     try:
         content = open(file_path, encoding="utf-8", errors="ignore").read()
     except Exception:
-        return ""
+        return gr.update(visible=False)
     cues, dropped = tts_engine.parse_subtitles_ex(content)
     tb = _req_tb(request)
     if not cues:
-        return i18n.t(tb, "err.no_cues")
+        return gr.update(value=i18n.t(tb, "err.no_cues"), visible=True)
     mins = max(c["end"] for c in cues) / 60.0
     msg = i18n.t(tb, "sub.parsed").replace("{n}", str(len(cues))).replace("{m}", f"{mins:.1f}")
     if dropped:                                          # 超 6h 上限被丢 → 明示，避免静默缺尾
         msg += " · " + i18n.t(tb, "sub.dropped").replace("{d}", str(dropped))
-    return msg
+    return gr.update(value=msg, visible=True)            # 空壳沙条不再先于内容出现（C1）
 
 
 def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
@@ -929,7 +975,7 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                 label=I18N("style.title"), info=I18N("style.info"),
                                 elem_classes=["ev-style"],
                             )
-                            speed = gr.Slider(0.5, 2.0, value=1.0, step=0.1,
+                            speed = gr.Slider(0.5, 2.0, value=1.0, step=0.1, precision=1,
                                               label=I18N("field.speed"), info=I18N("field.speed_info"))
                             model_radio = gr.Radio(
                                 _model_choices(tb), value=_default_model,
@@ -967,12 +1013,18 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                             eb_compose = gr.HTML(I18N("_eb_compose"))
                             text_in = gr.Textbox(label=I18N("field.text"),
                                                  placeholder=I18N("field.text_ph"), lines=10)
+                            text_count = gr.Markdown("", visible=False,
+                                                     elem_classes=["ev-tokest"])
                             gen = gr.Button(I18N("btn.generate"), variant="primary",
                                             elem_id="ev-generate")
                             audio_out = gr.Audio(label=I18N("field.result"), elem_classes=["ev-audio"])
                 style_radio.change(do_apply_style, style_radio, [temperature, top_p],
                                    show_progress="hidden")
                 max_tokens.change(_loc_tok_estimate, max_tokens, tok_est, show_progress="hidden")
+                _tc = dict(inputs=[text_in, max_tokens], outputs=text_count,
+                           show_progress="hidden")
+                text_in.change(do_text_count, **_tc)     # 字数/档位前置反馈（E3）
+                max_tokens.change(do_text_count, **_tc)  # 换档后重新判定是否超档
                 gen.click(_run_generate,                                    # 禁用→生成→复位(出错也复位)
                           [text_in, lang_dd, voice_dd, temperature, top_p, speed,
                            top_k, rep_pen, max_tokens, seed_in, model_radio],
@@ -1119,6 +1171,7 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 with gr.Row(elem_classes=["ev-row"]):
                     with gr.Column(scale=2, min_width=320):
                         with gr.Group(elem_classes=["ev-card"]):
+                            sub1_eb = gr.HTML(I18N("_eb_sub1"))
                             sub_file = gr.File(label=I18N("sub.file"), file_count="single",
                                                type="filepath",
                                                file_types=[".srt", ".vtt", ".lrc", ".txt"])
@@ -1135,9 +1188,9 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                 value=True, label=I18N("sub.detect_speakers"),
                                 info=I18N("sub.detect_speakers_info"))
                             sub_parse = gr.Button(I18N("sub.parse"), variant="primary")
-                            sub_preview = gr.Markdown("", elem_classes=["ev-readout"])
+                            sub_preview = gr.Markdown("", visible=False, elem_classes=["ev-readout"])
                             with gr.Group(visible=False, elem_classes=["ev-stage"]) as sub_roles_grp:
-                                roles_eb = gr.Markdown(I18N("sub.roles_title"))
+                                roles_eb = gr.HTML(I18N("_eb_sub2"))
                                 @gr.render(inputs=[_sub_proj, _vloc])
                                 def _render_roles(project, vloc):
                                     if not project:
@@ -1150,7 +1203,7 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                                   [dd, _sub_proj], [_sub_proj, sub_table, sub_gen],
                                                   show_progress="hidden", concurrency_id=_SUB_CC)
                     with gr.Column(scale=3, min_width=360):
-                        with gr.Group(elem_classes=["ev-card"]):
+                        with gr.Group(elem_classes=["ev-card"], visible=False) as sub_right_card:
                             with gr.Group(visible=False, elem_classes=["ev-stage"]) as sub_work_grp:
                                 sub_table = gr.Dataframe(
                                     headers=["#", i18n.t(tb, "sub.col_speaker"),
@@ -1173,6 +1226,7 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                     edit_audio = gr.Audio(label=I18N("sub.preview"),
                                                           interactive=False, elem_classes=["ev-audio"])
                             with gr.Group(visible=False, elem_classes=["ev-stage"]) as sub_out_grp:
+                                sub3_eb = gr.HTML(I18N("_eb_sub3"))
                                 sub_video = gr.File(label=I18N("sub.video"), file_count="single",
                                                     type="filepath")
                                 sub_mux = gr.Radio(choices=[(I18N("sub.mux_replace"), "replace"),
@@ -1189,7 +1243,8 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 sub_parse.click(do_sub_parse, [sub_file, sub_lang, sub_voice, sub_detect_spk],
                                 [_sub_proj, sub_table, _sub_sel, edit_text, edit_speaker,
                                  edit_audio, sub_gen, edit_apply, edit_reroll,
-                                 sub_roles_grp, sub_work_grp, sub_out_grp],
+                                 sub_roles_grp, sub_work_grp, sub_out_grp,
+                                 sub_right_card, sub_preview],
                                 concurrency_id=_SUB_CC)
                 sub_table.select(do_sub_select, [_sub_proj],
                                  [_sub_sel, edit_text, edit_speaker, edit_audio,
@@ -1273,7 +1328,9 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 sub_detect_spk: gr.update(label=L("sub.detect_speakers"),
                                           info=L("sub.detect_speakers_info")),
                 sub_parse: gr.update(value=L("sub.parse")),
-                roles_eb: gr.update(value=L("sub.roles_title")),
+                sub1_eb: gr.update(value=_eyebrow("① " + L("sub.step1"))),
+                roles_eb: gr.update(value=_eyebrow("② " + L("sub.step2"))),
+                sub3_eb: gr.update(value=_eyebrow("③ " + L("sub.step3"))),
                 sub_table: gr.update(headers=["#", L("sub.col_speaker"),
                                               L("sub.col_text"), L("sub.col_status")]),
                 sub_gen: gr.update(value=L("sub.gen_all")),

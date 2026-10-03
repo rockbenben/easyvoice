@@ -16,7 +16,8 @@ def test_t_fallback_to_key():
 
 def test_subtitle_dubbing_keys_present():
     from app import i18n
-    keys = ["sub.roles_title", "sub.parse", "sub.gen_all", "sub.col_speaker",
+    keys = ["sub.step1", "sub.step2", "sub.step3",
+            "sub.parse", "sub.gen_all", "sub.col_speaker",
             "sub.edit_title", "sub.preview", "sub.reroll", "sub.video",
             "sub.mux_mode", "sub.mux_replace", "sub.mux_keep", "sub.export",
             "sub.video_out", "sub.select_hint", "err.no_project",

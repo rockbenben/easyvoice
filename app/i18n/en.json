@@ -93,7 +93,7 @@
   "tab.subtitle": "Subtitle Dub",
   "sub.guide": "Three steps: ① upload & parse subtitles ② assign voices and generate line by line ③ assemble & export (optionally into your video).",
   "sub.file": "Subtitle file (SRT / VTT / LRC)",
-  "sub.parsed": "Parsed **{n}** lines · ~**{m}** min",
+  "sub.parsed": "Parsed **{n}** lines · **{m}** min of audio",
   "sub.dropped": "ignored **{d}** line(s) past the 6h limit",
   "err.need_subtitle": "Please upload a subtitle file first",
   "err.no_cues": "No subtitles parsed — check the format (SRT / VTT / LRC)",
@@ -101,7 +101,6 @@
   "btn.generating": "⏳ Generating…",
   "prog.chars": "{d}/{t} chars",
   "prog.cues": "{d}/{t} lines",
-  "sub.roles_title": "Voice per speaker",
   "sub.detect_speakers": "Subtitles have “Name: line” prefixes",
   "sub.detect_speakers_info": "Splits speakers by prefix; if unsure, turn off — every line uses the default voice (safer when text contains colons).",
   "sub.parse": "Parse subtitles",
@@ -134,5 +133,11 @@
   "st.dirty": "Edited",
   "st.ok": "Done",
   "st.error": "Failed",
-  "sub.gen_all_n": "Generate all ({n} pending)"
+  "sub.gen_all_n": "Generate all ({n} pending)",
+  "sub.step1": "Upload & parse subtitles",
+  "sub.step2": "Voices & generation",
+  "sub.step3": "Assemble & export",
+  "field.text_count": "{n} chars · ~{s}s of audio",
+  "field.text_over": "over the current tier (~{m} min) — raise the tier or split the text",
+  "footer.more": "More apps"
 }
