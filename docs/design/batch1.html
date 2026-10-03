@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>易声 batch1 · UI/UX/文案打磨稿</title>
+<style>
+  :root{
+    --ink:#1E2A23; --jade:#1C9C77; --jade-d:#127155; --mint:#8FE0C2;
+    --paper:#EAF0E7; --surface:#FFFFFF; --sand:#F4EEE1;
+    --line:#D7E2D5; --muted:#54625A; --r:16px;
+    --bad:#C0392B; --badbg:rgba(192,57,43,.08);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#F2F5F0;color:var(--ink);
+    font-family:'Noto Sans SC','Microsoft YaHei',system-ui,sans-serif;font-size:15px;line-height:1.65}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 22px 80px}
+  h1{font-size:26px;margin:6px 0 2px}
+  h2{font-size:20px;margin:44px 0 10px;padding-left:10px;border-left:4px solid var(--jade)}
+  h3{font-size:16px;margin:22px 0 8px}
+  .sub{color:var(--muted);margin:0 0 18px}
+  /* legend */
+  .legend{display:flex;flex-wrap:wrap;gap:10px 18px;background:#fff;border:1px solid var(--line);
+    border-radius:14px;padding:14px 18px;margin:18px 0 8px}
+  .legend b{font-weight:700}
+  .tag{display:inline-block;font-size:12px;font-weight:700;border-radius:999px;padding:1px 9px;
+    vertical-align:1px;margin-right:6px;white-space:nowrap}
+  .t-css{background:rgba(28,156,119,.13);color:var(--jade-d)}
+  .t-layout{background:rgba(63,111,181,.13);color:#2d5c96}
+  .t-copy{background:rgba(176,124,24,.15);color:#8a6110}
+  .t-be{background:rgba(192,57,43,.12);color:var(--bad)}
+  .t-bug{background:var(--bad);color:#fff}
+  .t-opt{background:#e5e8e3;color:var(--muted)}
+  .cons{color:var(--muted);font-size:13px}
+  /* evidence shots with red pins */
+  figure{margin:14px 0 6px}
+  .shot{position:relative;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff}
+  .shot img{display:block;width:100%}
+  .pin{position:absolute;border:2px solid var(--bad);border-radius:8px;background:var(--badbg);
+    pointer-events:none}
+  .pin i{position:absolute;top:-11px;left:-2px;font-style:normal;background:var(--bad);color:#fff;
+    font-size:11px;font-weight:800;border-radius:6px;padding:0 6px;line-height:17px;height:17px;
+    letter-spacing:.5px}
+  figcaption{font-size:13px;color:var(--muted);margin-top:4px}
+  /* issue list */
+  .issue{background:#fff;border:1px solid var(--line);border-left:4px solid var(--bad);
+    border-radius:10px;padding:12px 16px;margin:10px 0}
+  .issue.ok{border-left-color:var(--jade)}
+  .issue h4{margin:0 0 4px;font-size:15px}
+  .issue p{margin:4px 0}
+  .why{color:var(--muted);font-size:13.5px}
+  /* mock panels */
+  .mock{background:var(--paper);border:1px dashed #B9C8B6;border-radius:14px;padding:18px;margin:12px 0}
+  .mock .cap{font-size:12px;color:var(--muted);margin-bottom:10px;font-weight:700;letter-spacing:1px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px 18px}
+  .row{display:flex;align-items:center;gap:8px}
+  .grow{flex:1;min-width:0}
+  .name{font-weight:600}
+  .btn{display:inline-flex;align-items:center;justify-content:center;border-radius:10px;
+    border:1px solid var(--line);background:#fff;padding:6px 12px;font-size:13.5px;font-weight:600;
+    color:var(--ink);white-space:nowrap}
+  .btn.pri{background:var(--jade);border-color:var(--jade);color:#fff}
+  .btn.danger{background:#C0392B;border-color:#A93226;color:#fff}
+  .btn.ghost{border-color:transparent;background:transparent;color:var(--muted);padding:6px 8px}
+  .mini{width:34px;min-width:34px;padding:6px 0}
+  .chip{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:2px 12px;
+    font-size:12.5px;font-weight:700}
+  .c-pend{background:#F1EFE7;color:#8a6110}
+  .c-dirty{background:rgba(63,111,181,.13);color:#2d5c96}
+  .c-ok{background:rgba(28,156,119,.14);color:var(--jade-d)}
+  .c-err{background:rgba(192,57,43,.12);color:var(--bad)}
+  .pill{display:inline-flex;gap:2px;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.30);
+    border-radius:999px;padding:3px}
+  .pill a{color:#EAF7F0;font-size:13px;font-weight:600;line-height:1;padding:5px 11px;border-radius:999px;
+    text-decoration:none}
+  .pill a.on{background:#fff;color:var(--jade-d);font-weight:800}
+  .hero{background:linear-gradient(125deg,#0E5341 0%,#16745A 55%,#1C9270 100%);border-radius:16px;
+    padding:16px 22px;color:#EAF4EE}
+  .wave{height:26px;border-radius:6px;background:repeating-linear-gradient(90deg,#C9D6C8 0 2px,transparent 2px 5px)}
+  .stages{display:flex;gap:10px;flex-wrap:wrap}
+  .stage{flex:1;min-width:200px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .stage.dim{opacity:.45;border-style:dashed}
+  .stage .n{display:inline-flex;width:22px;height:22px;border-radius:50%;background:rgba(28,156,119,.13);
+    color:var(--jade-d);font-weight:800;font-size:12.5px;align-items:center;justify-content:center;margin-bottom:6px}
+  table.txt{width:100%;border-collapse:collapse;background:#fff;font-size:13.5px}
+  table.txt th,table.txt td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  table.txt th{background:var(--sand);font-size:13px}
+  table.txt td.key{font-family:Consolas,monospace;font-size:12px;white-space:nowrap;color:var(--muted)}
+  del{color:var(--bad);text-decoration:line-through;text-decoration-thickness:1.5px}
+  ins{color:var(--jade-d);text-decoration:none;background:rgba(28,156,119,.10);padding:0 3px;border-radius:4px}
+  .foot{margin-top:48px;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:13px}
+  .env{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 14px;
+    font-size:13px;color:var(--muted);margin:10px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>易声 EasyVoice · batch1 打磨稿</h1>
+<p class="sub">覆盖：全部 4 个标签页 + 全局（hero / 语言切换 / 状态胶囊 / 退出 / 页脚）+ 三语文案总表。
+每条改动标注 <b>是否动后端</b> 与 <b>同轮消费者</b>（改 A 必须同轮改 B 的清单），批准后按此整单执行。</p>
+
+<div class="legend">
+  <span><span class="tag t-bug">B</span>硬缺陷（截图实证）</span>
+  <span><span class="tag t-css">纯CSS</span>只改样式表</span>
+  <span><span class="tag t-layout">布局</span>只挪组件位置/显隐</span>
+  <span><span class="tag t-copy">文案</span>只改 i18n 值（三语同步）</span>
+  <span><span class="tag t-be">后端</span>要改 handler/渲染逻辑</span>
+  <span><span class="tag t-opt">可选</span>风险或口味取舍，可单独否</span>
+</div>
+<div class="env">实拍环境：本机 UI-only 起服（gradio 6.29，CPU 模式，无 torch），DPR=2 全屏截图。
+集成包 runtime 的 gradio 版本未锁，个别 Gradio 默认样式细节可能与包内略有出入，落地前在包内复拍一次（见文末「执行序」）。</div>
+
+<!-- ═══════════════════════ 全局 ═══════════════════════ -->
+<h2>0 · 全局：hero / 语言切换 / 状态 / 退出 / 页脚</h2>
+
+<figure>
+  <div class="shot">
+    <img src="img/batch1/01_dub.png" alt="配音页现状全页">
+    <div class="pin" style="left:57.4%;top:3.9%;width:9.6%;height:2.3%"><i>B3</i></div>
+    <div class="pin" style="left:68.4%;top:3.9%;width:21.6%;height:2.3%"><i>T1</i></div>
+    <div class="pin" style="left:43.4%;top:43%;width:46.2%;height:24%"><i>U3</i></div>
+    <div class="pin" style="left:10.4%;top:72.4%;width:30%;height:9.2%"><i>U3</i></div>
+    <div class="pin" style="left:80.8%;top:84.3%;width:8.8%;height:2.7%"><i>U4</i></div>
+    <div class="pin" style="left:10.4%;top:69.3%;width:30%;height:2.6%"><i>U5</i></div>
+  </div>
+  <figcaption>现状 ①：配音页（左列过长、右列大片空白；退出按钮孤悬）</figcaption>
+</figure>
+
+<div class="issue">
+  <h4><span class="tag t-bug">B3</span><span class="tag t-css">纯CSS</span>语言切换「当前项」白底白字，几乎不可读</h4>
+  <p>hero 右上角「简/繁/EN」胶囊：选中态样式（白底 + 玉绿字）被 <code>.ev-lang a{color:#EAF7F0}</code> 的近邻规则在部分渲染时序下压过，实拍中「简」呈白底白字。</p>
+  <p class="cons">同轮消费者：仅 CSS  specificity，一处加 <code>!important</code> 提权即可；无后端。</p>
+</div>
+
+<div class="issue">
+  <h4><span class="tag">T1</span><span class="tag t-copy">文案</span>CPU 状态胶囊：🐢 +「请耐心等待」偏训诫</h4>
+  <p>现状：<del>🐢 CPU 模式，生成较慢，请耐心等待</del> → 改后：<ins>CPU 模式 · 生成较慢，长文可分段</ins>（去掉乌龟表情与命令式；GPU 侧「⚡ 显卡加速中」保留）。</p>
+  <p class="cons">同轮消费者：<code>banner.cpu</code> 三语文件同步；无逻辑引用该文案。</p>
+</div>
+
+<div class="issue">
+  <h4><span class="tag">U4</span><span class="tag t-layout">布局</span>「退出」孤悬右下角，与页脚割裂</h4>
+  <p>现状：退出按钮单独浮在页面右下，离页脚 100+px，视觉上是"孤儿"。改后：并入页脚行 —— 左侧 GitHub / 更多作品，右侧退出（保持红色淡底、保持二次语义不变）。</p>
+  <p class="cons">同轮消费者：<code>ev-exitbar</code> 行并入 <code>_footer_html</code> 所在行；<code>exit_note</code> 文案落点随之移；按钮 id/class 不变，<code>do_exit</code> 与测试不动。</p>
+</div>
+
+<div class="mock">
+  <div class="cap">改后 mock · hero 右上的语言胶囊 + 状态（B3/T1）与页脚含退出（U4）</div>
+  <div class="hero row" style="justify-content:space-between">
+    <span style="font-weight:900;font-size:20px;letter-spacing:2px">易声 <span style="font-size:11px;letter-spacing:4px;font-weight:400">EASYVOICE</span></span>
+    <span class="row" style="gap:10px">
+      <span class="pill"><a class="on">简</a><a>繁</a><a>EN</a></span>
+      <span class="pill" style="gap:0;padding:7px 14px;font-size:13px">CPU 模式 · 生成较慢，长文可分段</span>
+    </span>
+  </div>
+  <div class="card row" style="margin-top:10px;justify-content:space-between">
+    <span class="row" style="gap:14px;color:var(--muted);font-size:13.5px">
+      <b style="color:var(--jade-d)">⌥ GitHub</b> 更多作品：AI 工具箱 · AI 绘图提示词 · AI 思想家圆桌 · AI Short
+    </span>
+    <span class="btn" style="background:#FBECEA;border-color:#F0C9C0;color:#9B4A3C">⏻ 退出</span>
+  </div>
+</div>
+
+<div class="issue ok">
+  <h4><span class="tag">U5</span><span class="tag t-css">纯CSS</span>「高级设置」折叠箭头方向反直觉（收起=◀，展开=▼）</h4>
+  <p>Gradio 默认 chevron 旋转 90°/0°，与本设计的 ▼/▲ 语义相反。改 CSS：收起时朝下、展开时朝上。<span class="cons">同轮消费者：无。</span></p>
+</div>
+
+<!-- ═══════════════════════ 配音 ═══════════════════════ -->
+<h2>1 · 配音页</h2>
+
+<figure>
+  <div class="shot">
+    <img src="img/batch1/05_dub_adv_open.png" alt="配音页高级设置展开现状">
+    <div class="pin" style="left:10.4%;top:53%;width:30%;height:3.2%"><i>T2</i></div>
+    <div class="pin" style="left:10.4%;top:73.8%;width:30%;height:5%"><i>U9</i></div>
+  </div>
+  <figcaption>现状 ②：高级设置展开后（top_p 裸参数名；最大生成长度滑杆挤在左列）</figcaption>
+</figure>
+
+<div class="issue">
+  <h4><span class="tag">U3</span><span class="tag t-layout">布局</span>左列过长：「方案名称 + 保存为方案」压在列尾，右列大片空白</h4>
+  <p>保存方案是低频动作，却占据首屏左列最显眼收尾位；同时右列「文本·生成」卡片下方到页脚空 400+px。改后：把「保存为方案」折进左列一个次级折叠（与「高级设置」同款样式，默认收起），左列缩短约 120px；「套用方案」下拉保持置顶。</p>
+  <p class="cons">同轮消费者：<code>dub_pname</code>/<code>dub_save</code> 移入新 Accordion（事件接线不变）；<code>_relabel_updates</code> 加新 accordion 标题键；<code>preset.save_title</code> 键复用为折叠标题。</p>
+</div>
+
+<div class="issue">
+  <h4><span class="tag">T2</span><span class="tag t-copy">文案</span>top_p / top_k 裸参数名 +「不懂可忽略」略居高临下</h4>
+  <p>现状：<del>top_p —— 高级采样参数，保持默认即可（不懂可忽略）。</del><br>
+  改后：<ins>采样多样性（top_p）—— 一般不用动；「风格」已配好联动值。</ins>（top_k 同款）。参数名保留在括号里，方便查资料时对得上。</p>
+  <p class="cons">同轮消费者：<code>adv.top_p</code>/<code>adv.top_p_info</code>/<code>adv.top_k</code>/<code>adv.top_k_info</code> 三语同步。</p>
+</div>
+
+<div class="issue">
+  <h4><span class="tag">T3</span><span class="tag t-copy">文案</span>「生成结果（可播放、可下载）」→「生成结果」</h4>
+  <p>播放器本身就带播放/下载按钮，括号说明是冗余；字幕页同一 label 复用，一并生效。<span class="cons">同轮消费者：<code>field.result</code> 三语。</span></p>
+</div>
+
+<div class="issue">
+  <h4><span class="tag t-opt">可选</span><span class="tag">U9</span><span class="tag t-layout">布局</span><span class="tag t-be">后端</span>「最大生成长度」滑杆 512–65536 线性、步长 256，左端挤成一团</h4>
+  <p>实拍：默认 2048 时把手贴在最左，微调困难。改后：换成档位下拉（1 分钟≈750 / 3 分钟≈2250 / 5 分钟≈3750 / 10 分钟≈7500 / 自定义滑杆），token 折算说明保留。若不想动组件，退一步方案：滑杆改对数感档位 <span class="tag t-opt">可选</span>。</p>
+  <p class="cons">同轮消费者：<code>_PKEYS</code> localStorage 持久化（值仍是 int，兼容）；<code>do_generate</code>/<code>do_tok_estimate</code> 入参不变；<code>max_tokens.change→tok_est</code> 接线保留。</p>
+</div>
+
+<!-- ═══════════════════════ 音色库 ═══════════════════════ -->
+<h2>2 · 我的音色库</h2>
+
+<figure>
+  <div class="shot">
+    <img src="img/batch1/02_voices.png" alt="音色库现状">
+    <div class="pin" style="left:50%;top:27.5%;width:41%;height:61%"><i>U1</i></div>
+  </div>
+  <figcaption>现状 ③：每个音色一整台播放器，6 条音色页面拉到 2000+px</figcaption>
+</figure>
+
+<figure>
+  <div class="shot">
+    <img src="img/batch1/08_voice_del_confirm.png" alt="删除二次确认现状">
+    <div class="pin" style="left:51%;top:29.3%;width:40%;height:4.7%"><i>B4</i></div>
+  </div>
+  <figcaption>现状 ④：删除确认条（「删除」按钮应是红色 stop 样式，实拍为白底黑字）</figcaption>
+</figure>
+
+<div class="issue">
+  <h4><span class="tag">U1</span><span class="tag t-be">后端</span>逐行全尺寸播放器 → 紧凑行 + 点 ▶ 展开试听</h4>
+  <p>改后：一行 = 名称 + ▶试听 + ✎ ↑ ↓ 🗑（同一行高 ~44px）；点 ▶ 才在该行下方展开播放器（同一时刻最多展开一行，再点 ▶ 收起）。列表 6 条从 ~1200px 缩到 ~300px，「添加新音色」卡片与列表首屏同高。</p>
+  <p class="cons">同轮消费者：<code>_render_voices</code>（新增 <code>_vopen</code> State；Audio 改 visible 切换）；<code>voice.manage_hint</code> 文案加「点 ▶ 试听」；删除/编辑态行样式复用现有 ev-vrow。</p>
+</div>
+
+<div class="mock">
+  <div class="cap">改后 mock · 紧凑音色行（U1），第 2 行处于展开态</div>
+  <div class="card" style="display:flex;flex-direction:column;gap:8px">
+    <div class="row"><span class="name grow">明亮女声（英文朗读）</span>
+      <span class="btn mini">▶</span><span class="btn mini">✎</span><span class="btn mini">↑</span><span class="btn mini">↓</span><span class="btn mini">🗑</span></div>
+    <div class="row"><span class="name grow">低沉男声（中文朗读）</span>
+      <span class="btn mini" style="background:rgba(28,156,119,.14);border-color:var(--jade);color:var(--jade-d)">▼</span><span class="btn mini">✎</span><span class="btn mini">↑</span><span class="btn mini">↓</span><span class="btn mini">🗑</span></div>
+    <div class="row" style="padding:8px 10px;background:var(--sand);border-radius:10px">
+      <span class="btn ghost">🔊</span><span class="grow wave"></span><span style="font-size:12px;color:var(--muted)">0:10</span></div>
+    <div class="row"><span class="name grow">柔和女声（英文朗读）</span>
+      <span class="btn mini">▶</span><span class="btn mini">✎</span><span class="btn mini">↑</span><span class="btn mini">↓</span><span class="btn mini">🗑</span></div>
+  </div>
+</div>
+
+<div class="issue">
+  <h4><span class="tag t-bug">B4</span><span class="tag t-css">纯CSS</span>删除确认的「删除」按钮没吃到 stop 红色</h4>
+  <p>实拍为白底黑字，与「取消」几乎同权重，误点风险方向反了。给 <code>.ev-vrow-del .stop</code> 补红色（背景 #C0392B / 白字），「取消」保持次级。<span class="cons">同轮消费者：音色行与方案行共用此条 CSS，一次生效。</span></p>
+</div>
+
+<div class="issue">
+  <h4><span class="tag">T4</span><span class="tag t-copy">文案</span>「试听（录音/上传后在此播放）」→「试听」</h4>
+  <p>括号解释挪进上方引导条（<code>voice.hint</code> 已有"上传或录制…"，不重复）。<span class="cons">同轮消费者：<code>voice.ref_preview</code> 三语。</span></p>
+</div>
+
+<!-- ═══════════════════════ 常用方案 ═══════════════════════ -->
+<h2>3 · 常用方案</h2>
+
+<figure>
+  <div class="shot">
+    <img src="img/batch1/03_presets.png" alt="常用方案现状">
+    <div class="pin" style="left:10%;top:26.6%;width:80.5%;height:4.6%"><i>T5</i></div>
+  </div>
+  <figcaption>现状 ⑤：方案列表（结构尚可，主要是顶部引导条文案）</figcaption>
+</figure>
+
+<div class="issue">
+  <h4><span class="tag">T5</span><span class="tag t-copy">文案</span>顶部引导条一句话讲完，别再用符号串</h4>
+  <p>现状：<del>常用方案 = 存好的配音配置。套用和保存都在『配音』标签里；这里只整理：🗑 删除不需要的（想改名就在『配音』重存一个）。</del><br>
+  改后：<ins>这里整理已存的方案：删除不需要的。套用与保存都在「配音」页进行；改名 = 在配音页用新名字重存一遍再删旧的。</ins></p>
+  <p class="cons">同轮消费者：<code>guide.presets</code> 三语；<code>guide.tts</code> 是零引用死键，随 B6 一并删。</p>
+</div>
+
+<div class="issue">
+  <h4><span class="tag t-bug">B5</span><span class="tag t-copy">文案</span>空态文案与按钮名不一致</h4>
+  <p><code>preset.empty</code> 写「点【存为方案】」，实际按钮叫「保存为方案」。统一为按钮名。<span class="cons">同轮消费者：<code>preset.empty</code> 三语。</span></p>
+</div>
+
+<!-- ═══════════════════════ 字幕配音 ═══════════════════════ -->
+<h2>4 · 字幕配音</h2>
+
+<figure>
+  <div class="shot">
+    <img src="img/batch1/04_subtitle_empty.png" alt="字幕页未解析现状">
+    <div class="pin" style="left:44%;top:19.3%;width:46%;height:5.8%"><i>B1</i></div>
+    <div class="pin" style="left:44%;top:26%;width:46%;height:62%"><i>U2</i></div>
+    <div class="pin" style="left:10%;top:43.3%;width:31%;height:2.6%"><i>U2</i></div>
+  </div>
+  <figcaption>现状 ⑥：未上传字幕时，表头直接漏出内部 JSON，右侧编辑/导出/结果全部空挂</figcaption>
+</figure>
+
+<figure>
+  <div class="shot">
+    <img src="img/batch1/06_subtitle_parsed.png" alt="字幕解析后现状">
+    <div class="pin" style="left:82%;top:20.3%;width:8.2%;height:6.7%"><i>B2</i></div>
+  </div>
+  <figcaption>现状 ⑦：解析 3 条后，状态列裸显示英文 pending</figcaption>
+</figure>
+
+<div class="issue">
+  <h4><span class="tag t-bug">B1</span><span class="tag t-be">后端</span>字幕表头首次渲染泄漏 <code>__i18n__{"key":"sub.col_speaker"}</code> 原始 JSON</h4>
+  <p>根因：<code>gr.Dataframe(headers=[I18N(...)])</code> 的 i18n 代理对象不被 Dataframe 表头解析（其它组件都支持，唯独这里塌了）；load 后的 relabel 又晚于首帧。改后：headers 初始用构建期简体纯字符串，本地化仍走 <code>_relabel</code>（已存在），删掉 headers 里的 I18N() 调用。</p>
+  <p class="cons">同轮消费者：<code>ui.py</code> sub_table 构造一处；<code>_relabel_updates</code> 已覆盖 headers，不动；测试无逐字钉。</p>
+</div>
+
+<div class="issue">
+  <h4><span class="tag t-bug">B2</span><span class="tag t-be">后端</span>状态列裸显示 <code>pending / dirty / ok / error</code></h4>
+  <p>开发者内部值直达用户。改后：<code>_sub_table</code> 按请求语言映射为「待生成 / 已改动 / 完成 / 失败」（新增 <code>st.*</code> 三语键），所有回传表格的 handler 统一走映射。</p>
+  <p class="cons">同轮消费者：<code>_sub_table</code> 及全部调用点（parse / select / edit / reroll / gen_all / export 后刷新）；语言来源用已有 <code>_vloc</code> State；<code>test_dubbing_project</code> 若断言内部值仍用原枚举，仅 UI 层映射。</p>
+</div>
+
+<div class="mock">
+  <div class="cap">改后 mock · 状态列本地化（B2）</div>
+  <div class="card">
+    <table class="txt" style="table-layout:fixed">
+      <tr><th style="width:36px">#</th><th style="width:64px">角色</th><th>文本</th><th style="width:86px">状态</th></tr>
+      <tr><td>1</td><td>小明</td><td>大家好，欢迎收看这期节目。</td><td><span class="chip c-ok">完成</span></td></tr>
+      <tr><td>2</td><td>小红</td><td>今天我们聊聊本地语音合成。</td><td><span class="chip c-pend">待生成</span></td></tr>
+      <tr><td>3</td><td>旁白</td><td>字幕配音可以按说话人分配不同音色。</td><td><span class="chip c-dirty">已改动</span></td></tr>
+      <tr><td>4</td><td>旁白</td><td>（合成失败的行）</td><td><span class="chip c-err">失败</span></td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="issue">
+  <h4><span class="tag">U2</span><span class="tag t-be">后端</span>未解析时整页空挂 → 三段渐进式</h4>
+  <p>现状：编辑选中条、混音方式、合成导出、三个结果位全部在上传前就摆出来（现状⑥红框 ~1500px 空壳）。改后按流程三段：<b>① 上传解析</b> → <b>② 角色配音 + 逐条生成</b> → <b>③ 合成导出</b>；②③默认隐藏，解析成功/首次生成后依次出现。「生成全部」按钮旁加计数徽标（如「生成全部 · 3 条待生成」）。</p>
+  <p class="cons">同轮消费者：<code>do_sub_parse</code> 追加 visible 更新；<code>tab_subtitle.select</code> 复位时同步隐藏；<code>_relabel_updates</code> 不受影响（组件还在，只是 hidden）；<code>sub.guide</code> 文案改写为三段式导语（T6）。</p>
+</div>
+
+<div class="mock">
+  <div class="cap">改后 mock · 字幕页三段渐进（U2，当前处于第①段）</div>
+  <div class="stages">
+    <div class="card stage" style="flex:2;min-width:280px"><span class="n">1</span>
+      <div class="row" style="border:1px dashed #B9C8B6;border-radius:10px;padding:14px;justify-content:center;color:var(--muted)">将字幕文件拖放到此处 · 或点击上传（SRT / VTT / LRC）</div>
+      <p style="font-size:13px;color:var(--muted);margin:8px 0 4px">配音语言 · 默认音色 · 角色前缀开关 · <b class="btn pri" style="padding:4px 14px">解析字幕</b></p>
+    </div>
+    <div class="stage dim"><span class="n">2</span>角色配音 · 逐条生成<br><span style="font-size:12.5px">解析后出现</span></div>
+    <div class="stage dim"><span class="n">3</span>合成导出<br><span style="font-size:12.5px">生成后出现</span></div>
+  </div>
+</div>
+
+<div class="issue">
+  <h4><span class="tag">U10</span><span class="tag t-be">后端</span>没选中行时「保存 / 重录」空转 → 置灰 + 占位提示</h4>
+  <p>现状：未选行时点按钮弹「在上表点选一行以编辑」，属于事后诸葛。改后：未选行时两按钮 <code>interactive=False</code>，编辑框 placeholder 显示该提示；选中后恢复。<span class="cons">同轮消费者：<code>do_sub_select</code>/<code>do_sub_parse</code> 追加按钮状态更新；<code>sub.select_hint</code> 键复用为 placeholder。</span></p>
+</div>
+
+<div class="issue">
+  <h4><span class="tag">T6</span><span class="tag t-copy">文案</span>「字幕含说话人前缀（名字：台词）」勾选框语义反转</h4>
+  <p>勾选框文案是陈述句，用户要读 info 才知道勾上代表"我的字幕长这样"。改后标签：<ins>字幕里带「名字：台词」前缀</ins>；info 首句改为「按前缀自动拆分角色；不确定就关掉，全部用默认音色。」<span class="cons">同轮消费者：<code>sub.detect_speakers(_info)</code> 三语。</span></p>
+</div>
+
+<!-- ═══════════════════════ 文案总表 ═══════════════════════ -->
+<h2>5 · 文案总表（zh-Hans，en / zh-Hant 同轮同步）</h2>
+<p class="sub">只列有改动的键；未列出的键保持原样。改后列即最终落地值。</p>
+<table class="txt">
+  <tr><th style="width:170px">键</th><th style="width:36%">现状</th><th style="width:36%">改后</th><th>关联</th></tr>
+  <tr><td class="key">banner.cpu</td><td><del>🐢 CPU 模式，生成较慢，请耐心等待</del></td><td><ins>CPU 模式 · 生成较慢，长文可分段</ins></td><td>T1</td></tr>
+  <tr><td class="key">field.result</td><td><del>生成结果（可播放、可下载）</del></td><td><ins>生成结果</ins></td><td>T3</td></tr>
+  <tr><td class="key">adv.top_p / adv.top_k</td><td><del>top_p / top_k</del></td><td><ins>采样多样性（top_p）/ 采样候选数（top_k）</ins></td><td>T2</td></tr>
+  <tr><td class="key">adv.top_p_info / top_k_info</td><td><del>高级采样参数，保持默认即可（不懂可忽略）。</del></td><td><ins>一般不用动；「风格」已配好联动值。</ins></td><td>T2</td></tr>
+  <tr><td class="key">adv.hint</td><td><del>下面这些都有合理默认值，新手可直接跳过；想微调声音再动。</del></td><td><ins>都有合理默认值，直接跳过即可；想微调声音再进来。</ins></td><td>口吻统一</td></tr>
+  <tr><td class="key">voice.ref_preview</td><td><del>试听（录音/上传后在此播放）</del></td><td><ins>试听</ins></td><td>T4</td></tr>
+  <tr><td class="key">voice.hint</td><td><del>上传或录制一段约10秒的清晰人声即可克隆。</del></td><td><ins>上传或录制一段约 10 秒的清晰人声即可克隆；录好后在「试听」里先听一遍。</ins></td><td>T4 承接</td></tr>
+  <tr><td class="key">preset.empty</td><td><del>还没有方案。在『配音』里调好后点【存为方案】即可。</del></td><td><ins>还没有方案。在「配音」页调好后点「保存为方案」即可。</ins></td><td>B5</td></tr>
+  <tr><td class="key">guide.presets</td><td><del>（见 §3 现状）</del></td><td><ins>（见 §3 改后）</ins></td><td>T5</td></tr>
+  <tr><td class="key">sub.guide</td><td><del>上传字幕，按说话人分配音色，逐条挑错后合成；可合进原视频。</del></td><td><ins>三步：① 上传字幕并解析 ② 给角色配音色、逐条生成 ③ 合成导出（可合进原视频）。</ins></td><td>U2</td></tr>
+  <tr><td class="key">sub.detect_speakers</td><td><del>字幕含说话人前缀（名字：台词）</del></td><td><ins>字幕里带「名字：台词」前缀</ins></td><td>T6</td></tr>
+  <tr><td class="key">sub.detect_speakers_info</td><td><del>关闭：所有行按单一默认音色配音——适合正文含冒号（时间、Note:、网址）的普通字幕，避免误拆吞字。</del></td><td><ins>按前缀自动拆分角色；不确定就关掉，全部行用默认音色（正文含冒号时不易误拆）。</ins></td><td>T6</td></tr>
+  <tr><td class="key">st.pending / st.dirty / st.ok / st.error</td><td>（新增）</td><td><ins>待生成 / 已改动 / 完成 / 失败</ins></td><td>B2</td></tr>
+  <tr><td class="key">sub.gen_all</td><td><del>生成全部</del></td><td><ins>生成全部（{n} 条待生成）</ins>；n=0 时退回「生成全部」</td><td>U2 徽标</td></tr>
+  <tr><td class="key">app.exit_done</td><td><del>易声已停止，可关闭此页面与命令行窗口。</del></td><td><ins>已退出，可直接关闭此页面。</ins></td><td>U4 同区</td></tr>
+  <tr><td class="key">hero.trust</td><td>本地运行 · 完全免费 · 声音不会离开这台电脑</td><td>不动（信任语，保留）</td><td>—</td></tr>
+</table>
+
+<h2>6 · 死键清理（B6）</h2>
+<div class="issue">
+  <h4><span class="tag t-bug">B6</span><span class="tag t-copy">文案</span>18 个零消费者 i18n 键，三语文件各删一份</h4>
+  <p><code>guide.tts · voice.delete · voice.select · voice.rename · voice.new_name · status.generating_gpu · status.generating_cpu · sub.generate · preset.apply · preset.delete · err.need_voice_rename · err.need_voice_pick · voice.move_up · voice.move_down · edit.edit · voice.reaudio · sub.col_idx · preset.save_hint</code></p>
+  <p class="why">均为早期界面重构遗留（旧按钮/旧面板的文案），现无任何 py/HTML 消费。删除后 <code>test_three_locales_share_keys</code>（三语键集必须一致）仍绿——前提是三语同步删。</p>
+  <p class="cons">同轮消费者：三个 locale JSON 文件；无代码改动。</p>
+</div>
+
+<h2>7 · 执行序与验证（批准后）</h2>
+<div class="issue ok">
+  <p>① 先修 B1/B2/B3/B4/B5/B6（缺陷类，无口味空间）→ ② 布局/后端类 U1–U5、U9、U10 → ③ 文案表整单落地（三语）。</p>
+  <p>验证：pytest 全绿 + UI-only 起服复拍同机位对比图（含 en / zh-Hant 各一张抽查）；U1/U2 需在浏览器里点一遍真实流程（试听展开、三段出现）再交验收。</p>
+  <p class="why">注：本稿截图来自 gradio 6.29 的 UI-only 环境；集成包 runtime 版本未锁，若包内 Gradio 渲染有差异（如折叠箭头、stop 按钮底色），落地时以包内复拍为准微调。</p>
+</div>
+
+<div class="foot">batch1 · 2026-10-03 · 实拍 8 张（含 2 张过程图未收录）· 被否项将在下轮标「撤回」</div>
+</div>
+</body>
+</html>
