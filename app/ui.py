@@ -847,7 +847,8 @@ def _run_sub_gen_all(project, model_pref="auto", request: gr.Request = None, pro
         yield _gen_btn(project), gr.update(), project, gr.update()
         raise
     yield (_gen_btn(project), gr.update(value=_sub_table(project)), project,
-           gr.update(visible=True))
+           gr.update(visible=any(c["status"] == "ok" for c in project["cues"])))
+           # 全失败时不揭开导出区（揭开了也只能拿到 nothing_generated 报错，徒增困惑）
 
 
 def _run_sub_export(project, video_path, mux_mode, request: gr.Request = None,
