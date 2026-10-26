@@ -59,9 +59,10 @@ easyvoice/
 │   ├── presets.py        # 预设管理（保存 / 加载参数组合）
 │   ├── seed.py           # 首次启动的示例音色 / 预设
 │   ├── tts_engine.py     # TTS 引擎（加载、合成、分段、字幕对齐、变速、模型选择）
-│   ├── dubbing_project.py# 字幕配音工程态（说话人识别 / 逐条生成·重录 / 拼装）
+│   ├── dubbing_project.py# 字幕配音工程态（说话人识别 / 逐条生成·重录·可中止 / 拼装）
 │   ├── video_mux.py      # 把配音合进视频（ffmpeg）
 │   └── ui.py             # Gradio UI（四标签页）
+├── AGENTS.md             # 开发约定正本（改代码前先读）
 ├── app_main.py           # 应用入口
 ├── build.ps1             # 整合包打包脚本（conda-pack 运行时 + 模型 + ffmpeg）
 ├── Start EasyVoice.bat   # Windows 用户启动脚本

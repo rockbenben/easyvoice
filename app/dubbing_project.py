@@ -100,13 +100,24 @@ def generate_cue(project, idx, seed_override=None):
     return project
 
 
-def generate_all(project, progress_cb=None):
-    """只生成 pending/dirty/error 的 cue（已 ok 的跳过，省时；error 在重点生成时重试）。"""
-    todo = [c for c in project["cues"] if c["status"] in ("pending", "dirty", "error")]   # 重点生成时重试失败条
+def generate_all_iter(project, progress_cb=None, cancel_check=None):
+    """逐条生成 pending/dirty/error 的 cue；每条完成 yield 一次，供 UI 推进度/状态表。
+    cancel_check 在每条开始前检查；返回 True 则停止，已完成的保留。"""
+    todo = [c for c in project["cues"] if c["status"] in ("pending", "dirty", "error")]
+    total = len(todo)
     for i, c in enumerate(todo):
+        if cancel_check and cancel_check():
+            return
         generate_cue(project, c["idx"])
         if progress_cb:
-            progress_cb(i + 1, len(todo))
+            progress_cb(i + 1, total)
+        yield i + 1, total
+
+
+def generate_all(project, progress_cb=None):
+    """只生成 pending/dirty/error 的 cue（已 ok 的跳过，省时；error 在重点生成时重试）。"""
+    for _ in generate_all_iter(project, progress_cb):
+        pass
     return project
 
 

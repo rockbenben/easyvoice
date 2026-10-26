@@ -1,19 +1,20 @@
 # EasyVoice (易声)
 
-> A local, multilingual, dead-simple dubbing / voice-cloning tool built on Qwen3-TTS.
+> A local, multilingual dubbing and voice-cloning tool built on Qwen3-TTS — record a clip, then read any text aloud.
 
 **English** · [简体中文](README.md)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/rockbenben/easyvoice)](https://github.com/rockbenben/easyvoice/releases/latest) [![Powered by Qwen3-TTS](https://img.shields.io/badge/Powered%20by-Qwen3--TTS-orange.svg)](https://github.com/QwenLM/Qwen3-TTS) [![365 Open Source Plan #018](https://img.shields.io/badge/365%20Open%20Source%20Plan-%23018-1f6feb)](https://github.com/rockbenben/365opensource)
 
-![EasyVoice — turn text into a voice](assets/brand/social-card.en.png)
+![The Dubbing tab: pick a voice, type text, generate and play the result](assets/brand/screenshot.en.png)
 
 ## Overview
 
-**EasyVoice** is a local, **multilingual**, dead-simple dubbing / voice-cloning tool built on [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) (Chinese-first UI, works out of the box):
+**EasyVoice** is a local, **multilingual** dubbing / voice-cloning tool built on [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS):
 
-- **3-second voice cloning** — upload or record ~3 seconds of reference audio to clone a voice for any text / subtitle dubbing.
+- **Voice cloning** — upload or record a reference clip (the UI asks for ~10 s of clean speech) and reuse that voice for any text or subtitle dubbing.
 - **Multilingual** — 10 languages: Chinese, English, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian. Auto-detect by default, or pick manually.
+- **Trilingual interface** — Simplified / Traditional Chinese / English, following the browser language, with a manual switch in the header.
 - **Remembers your settings** — language / voice / style / speed etc. are saved and restored on next launch.
 - **Subtitle dubbing (multi-speaker)** — upload subtitles (SRT / VTT / LRC); voices are auto-assigned per speaker from leading `Name:` prefixes, each line can be previewed / edited / re-rolled, generated timeline-aligned, and muxed straight into your video (dubbed video + aligned subtitles exported). Plain subtitles without prefixes work too (single voice); turn off the _Subtitles have speaker prefixes_ toggle when the text contains colons to avoid mis-splitting. Only have audio/video and no subtitles yet? Run it through [funasr-subtitle](https://github.com/rockbenben/funasr-subtitle) first to get an `.srt`.
 - **Runs locally** — fully local inference, nothing uploaded to the cloud.
@@ -56,9 +57,9 @@ Run `Start EasyVoice.bat` in the folder. The first launch takes ~30s (model load
 A browser opens automatically at `http://127.0.0.1:7860` (if that port is taken the app falls back to another one — trust the address printed in the console window), with four tabs:
 
 - **Dubbing** — type text, pick a language (Auto by default) and reference voice, click generate
-- **Subtitle dubbing** — upload subtitles → assign a voice per speaker → fix lines (preview / edit / re-roll) → assemble & export (optionally muxed into your video)
 - **My Voices** — upload or record reference voices and manage them (add / delete / rename / reorder / preview)
-- **Presets** — save frequently used parameter presets (language + voice) for quick reuse
+- **Presets** — save frequently used parameter presets (language + voice + style + speed) for quick reuse
+- **Subtitle dubbing** — upload subtitles → assign a voice per speaker → fix lines (preview / edit / re-roll, batch generation can be stopped any time) → assemble & export (optionally muxed into your video)
 
 > **To quit:** close the **console window** that opened at launch (⚠️ closing the browser alone won't quit — the server keeps running in the background, holding memory and the port); or click the **Quit** button at the bottom-right of the page.
 
@@ -94,4 +95,6 @@ Per-release notes are on [Releases](../../releases); changes that are in the sou
 
 ## About the 365 Open Source Plan
 
-Project **#018** of the [365 Open Source Plan](https://github.com/rockbenben/365opensource) — one person + AI, 300+ open-source projects in a year. [Submit your idea →](https://365.aishort.top/) · [Discord](https://discord.gg/PZTQfJ4GjX) · [Telegram](https://t.me/aishort_top)
+Project **#018** of the [365 Open Source Plan](https://github.com/rockbenben/365opensource) — one person + AI, 300+ open-source projects in a year.
+
+[Submit your idea →](https://365.aishort.top/) · [Discord](https://discord.gg/PZTQfJ4GjX) · [Telegram](https://t.me/aishort_top)

@@ -145,7 +145,7 @@ foreach ($f in @(
     "CHANGELOG.md", "CHANGELOG.en.md",
     "LICENSE", "requirements.txt",
     "docs\ARCHITECTURE.md", "docs\SPIKE-qwen-tts.md",
-    "assets\brand\social-card.png", "assets\brand\social-card.en.png",
+    "assets\brand\screenshot.png", "assets\brand\screenshot.en.png",
     "assets\packaging\THIRD-PARTY-NOTICES.txt")) {
   $p = Join-Path $ProjectRoot $f
   if (-not (Test-Path $p)) { Write-Warning "missing $f -- the bundled README's link to it will break"; continue }

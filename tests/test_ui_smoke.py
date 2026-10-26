@@ -106,7 +106,7 @@ def test_do_subtitle_preview_warns_when_cues_dropped(monkeypatch, tmp_path):
                  "2\n00:00:01,000 --> 00:00:02,000\nB\n", encoding="utf-8")
     upd = ui.do_subtitle_preview(str(f))                   # request=None → 简体
     assert "已忽略" in upd["value"]
-    assert upd["visible"] is True                          # 有内容才现身（C1）
+    assert upd["visible"] is True                          # 有内容才现身
     ok = tmp_path / "ok.srt"
     ok.write_text("1\n00:00:01,000 --> 00:00:02,000\nB\n", encoding="utf-8")
     assert "已忽略" not in ui.do_subtitle_preview(str(ok))["value"]
@@ -145,9 +145,15 @@ def test_do_preset_delete_clears_and_bumps(monkeypatch, tmp_path):
     deleted = []
     monkeypatch.setattr(presets, "delete_preset", lambda name: deleted.append(name))
     monkeypatch.setattr(presets, "list_presets", lambda: [])
-    bump, pending, _upd = ui.do_preset_delete("my-preset", 2)
+    bump, pending, upd = ui.do_preset_delete("my-preset", 2)
     assert deleted == ["my-preset"]
     assert bump == 3 and pending is None
+    # 没传当前选择 → 下拉清空；删别的方案时保留当前选择，删的正是当前方案才清空
+    assert (upd.get("value") if isinstance(upd, dict) else getattr(upd, "value", None)) is None
+    _b, _p, keep = ui.do_preset_delete("other", 0, current="my-preset")
+    assert (keep.get("value") if isinstance(keep, dict) else getattr(keep, "value", None)) == "my-preset"
+    _b2, _p2, gone = ui.do_preset_delete("my-preset", 0, current="my-preset")
+    assert (gone.get("value") if isinstance(gone, dict) else getattr(gone, "value", None)) is None
 
 def test_do_save_preset_returns_dropdown_and_bump(monkeypatch, tmp_path):
     from app import ui, presets, config
@@ -359,7 +365,7 @@ def test_subtitle_dub_helpers_build_table(monkeypatch, tmp_path):
     tb = i18n.load("zh-Hans")
     assert rows[0] == [1, "张三", "你好", i18n.t(tb, "st.pending")]   # 状态列必须是用户词
     assert rows[1][1] == "李四"
-    # 内部枚举不得直达界面（B2 回归钉）
+    # 内部枚举不得直达界面
     for leak in ("pending", "dirty", "ok", "error"):
         assert all(leak != r[3] for r in rows)
 
@@ -426,8 +432,10 @@ def test_run_sub_gen_all_sets_model(monkeypatch, tmp_path):
     from app import ui, dubbing_project as dp
     monkeypatch.setattr(dp.config, "OUTPUTS_DIR", tmp_path)
     captured = {}
-    monkeypatch.setattr(dp, "generate_all",
-                        lambda p, progress_cb=None: captured.update(model=p["params"].get("model")))
+    def _fake_iter(p, progress_cb=None, cancel_check=None):
+        captured.update(model=p["params"].get("model"))
+        return iter(())
+    monkeypatch.setattr(dp, "generate_all_iter", _fake_iter)
     proj = dp.build_project("1\n00:00:01,000 --> 00:00:02,000\n你好\n", "chinese", "v0")
     list(ui._run_sub_gen_all(proj, "1.7b"))     # 消费生成器
     assert captured["model"] == "1.7b"
@@ -472,6 +480,9 @@ def test_do_sub_parse_resets_selection(monkeypatch, tmp_path):
     out = ui.do_sub_parse(str(f), "english", "v0")
     # 输出顺序: project, table, _sub_sel, edit_text, edit_speaker, edit_audio
     assert out[2] is None and out[5] is None        # 选中与试听被重置
+    # 解析后摘要必须改成"已解析"，不能还提示用户再点一次解析
+    preview = out[-1].get("value") if isinstance(out[-1], dict) else getattr(out[-1], "value", "")
+    assert "已解析" in preview
 
 
 def test_run_sub_export_nothing_generated_raises_grerror(monkeypatch, tmp_path):
@@ -521,13 +532,192 @@ def test_do_generate_deleted_voice_midgen_friendly_error(monkeypatch, tmp_path):
         ui.do_generate("some text", "chinese", "v0")
 
 
-def test_do_generate_real_error_not_masked(monkeypatch, tmp_path):
-    # ref 仍在时的真实合成错误必须原样冒泡，不能被"音色缺失"掩盖
-    import pytest
+def test_do_generate_real_error_is_friendly(monkeypatch, tmp_path):
+    # ref 仍在时的真实合成错误 → 可见的友好提示（不再裸冒泡到沉默的 Error）
+    import gradio as gr, pytest
     from app import ui, tts_engine
     ref = tmp_path / "here.wav"; ref.write_bytes(b"x")
     monkeypatch.setattr(ui.voice_library, "get_audio_path", lambda vid: str(ref))
     monkeypatch.setattr(tts_engine, "synthesize",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("real synth failure")))
-    with pytest.raises(RuntimeError):
+    with pytest.raises(gr.Error) as err:
         ui.do_generate("text", "chinese", "v0")
+    assert "生成失败" in str(err.value)
+
+
+def test_do_generate_oom_suggests_fast_model(monkeypatch, tmp_path):
+    import gradio as gr, pytest
+    from app import ui, tts_engine
+    ref = tmp_path / "here.wav"; ref.write_bytes(b"x")
+    monkeypatch.setattr(ui.voice_library, "get_audio_path", lambda vid: str(ref))
+    monkeypatch.setattr(tts_engine, "synthesize",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("CUDA out of memory")))
+    with pytest.raises(gr.Error) as err:
+        ui.do_generate("text", "chinese", "v0")
+    assert "内存不足" in str(err.value) and "0.6B" in str(err.value)
+
+
+def test_do_generate_missing_text_says_text_only(monkeypatch):
+    """只缺文字时不能再报"文字和音色都要填"（音色明明已选）。"""
+    import gradio as gr, pytest
+    from app import ui
+    with pytest.raises(gr.Error) as err_text:
+        ui.do_generate("", "chinese", "v0")
+    assert "文字" in str(err_text.value)
+    with pytest.raises(gr.Error) as err_voice:
+        ui.do_generate("hi", "chinese", "")
+    assert "音色" in str(err_voice.value)
+
+
+def test_do_apply_preset_empty_is_noop(monkeypatch, tmp_path):
+    """手动调参会清空方案下拉并触发 change；空值必须是无操作，不是错误弹窗。"""
+    from app import ui
+    result = ui.do_apply_preset("")
+    assert len(result) == 6
+
+
+def test_do_save_preset_confirms_and_selects(monkeypatch, tmp_path):
+    """保存方案：必须回显成功提示，并让下拉显示刚保存的方案（参数与它一致）。"""
+    from app import ui, presets
+    monkeypatch.setattr(presets.config, "PRESETS_DIR", tmp_path)
+    monkeypatch.setattr(presets, "save_preset", lambda name, data: None)
+    monkeypatch.setattr(presets, "list_presets", lambda: ["X"])
+    infos = []
+    monkeypatch.setattr(ui.gr, "Info", lambda msg: infos.append(msg))
+    upd, bump = ui.do_save_preset("X", "chinese", "v1", 0.9, 0.9, 1.0, 4)
+    assert bump == 5
+    assert (upd.get("value") if isinstance(upd, dict) else getattr(upd, "value", None)) == "X"
+    assert infos and "X" in infos[0]
+
+
+def test_run_sub_gen_all_blocks_unsaved_edit(monkeypatch, tmp_path):
+    """编辑框改了字但没点保存时，生成全部必须提示并停下（不能悄悄读旧台词）。"""
+    from app import ui, dubbing_project as dp
+    monkeypatch.setattr(dp.config, "OUTPUTS_DIR", tmp_path)
+    warnings, generated = [], []
+    monkeypatch.setattr(ui.gr, "Warning", lambda msg: warnings.append(msg))
+    def _fake_iter(p, progress_cb=None, cancel_check=None):
+        generated.append(1)
+        yield 1, 1
+    monkeypatch.setattr(dp, "generate_all_iter", _fake_iter)
+    p = dp.build_project("1\n00:00:01,000 --> 00:00:02,000\n旧台词\n", "chinese", "v0")
+    p["cues"][0]["status"] = "pending"     # 未保存守卫若失守，会真的进入生成循环
+    frames = list(ui._run_sub_gen_all(p, "auto", "新台词", "默认", 0))
+    assert warnings and "未保存" in warnings[0]
+    assert generated == []
+    assert len(frames) == 1 and _btn_interactive(frames[0][0]) is True   # 按钮不被卡在生成中
+
+
+def test_do_sub_reroll_blocks_unsaved_edit(monkeypatch, tmp_path):
+    """「重录」与「保存」在同一行：面板改了字没保存时必须提示并停下，不能录旧台词。"""
+    from app import ui, dubbing_project as dp
+    monkeypatch.setattr(dp.config, "OUTPUTS_DIR", tmp_path)
+    warnings, rolled = [], []
+    monkeypatch.setattr(ui.gr, "Warning", lambda msg: warnings.append(msg))
+    def _fake_reroll(p, idx):
+        rolled.append(idx)
+        return p
+    monkeypatch.setattr(dp, "reroll_cue", _fake_reroll)
+    p = dp.build_project("1\n00:00:01,000 --> 00:00:02,000\n旧台词\n", "chinese", "v0")
+    p["cues"][0]["status"] = "ok"
+    out = ui.do_sub_reroll(p, 0, "auto", "新台词", "默认")
+    assert warnings and "未保存" in warnings[0]
+    assert rolled == []                              # 守卫失守才会真的重录
+    assert "value" not in out[1]                     # 状态表保持无操作
+
+
+def test_do_sub_reroll_proceeds_when_panel_matches_saved(monkeypatch, tmp_path):
+    """已保存的内容（哪怕带首尾空格）不能再被判成未保存，否则挡住正常重录。"""
+    from app import ui, dubbing_project as dp
+    monkeypatch.setattr(dp.config, "OUTPUTS_DIR", tmp_path)
+    warnings, rolled = [], []
+    monkeypatch.setattr(ui.gr, "Warning", lambda msg: warnings.append(msg))
+    monkeypatch.setattr(dp, "reroll_cue", lambda p, idx: rolled.append(idx))
+    p = dp.build_project("1\n00:00:01,000 --> 00:00:02,000\n旧台词\n", "chinese", "v0")
+    p["cues"][0]["status"] = "ok"
+    assert ui._cue_has_unsaved_edit(p, 0, " 旧台词 ", "默认 ") is False
+    ui.do_sub_reroll(p, 0, "auto", " 旧台词 ", "默认 ")
+    assert rolled == [0] and warnings == []
+
+
+def test_run_sub_gen_all_reports_all_done(monkeypatch, tmp_path):
+    """全部完成后再点「生成全部」不能静默空转，要给出口。"""
+    from app import ui, dubbing_project as dp
+    monkeypatch.setattr(dp.config, "OUTPUTS_DIR", tmp_path)
+    infos, generated = [], []
+    monkeypatch.setattr(ui.gr, "Info", lambda msg: infos.append(msg))
+    def _fake_iter(p, progress_cb=None, cancel_check=None):
+        generated.append(1)
+        yield 1, 1
+    monkeypatch.setattr(dp, "generate_all_iter", _fake_iter)
+    p = dp.build_project("1\n00:00:01,000 --> 00:00:02,000\n你好\n", "chinese", "v0")
+    p["cues"][0]["status"] = "ok"
+    frames = list(ui._run_sub_gen_all(p, "auto"))
+    assert infos and "已生成" in infos[0]
+    assert generated == []            # 全部完成时不得进入生成循环
+    assert len(frames) == 1 and _btn_interactive(frames[0][0]) is True
+
+
+def test_do_text_count_auto_split_not_tier_warning(monkeypatch):
+    """长文按段自动生成，计数不能再报"超出档位/建议升档"。"""
+    from app import ui
+    short = ui.do_text_count("你好" * 8)          # 16 字
+    short_val = short.get("value") if isinstance(short, dict) else getattr(short, "value", "")
+    assert "16 字" in short_val and "秒" in short_val
+    assert "自动分段" not in short_val
+
+    long = ui.do_text_count("这是一段很长的测试文本。" * 250)   # 3000 字
+    long_val = long.get("value") if isinstance(long, dict) else getattr(long, "value", "")
+    assert "3000 字" in long_val and "12.5 分钟" in long_val
+    assert "长文会自动分段生成" in long_val
+    assert "超出" not in long_val and "升档" not in long_val
+
+
+def test_stop_sub_gen_marks_project(monkeypatch):
+    from app import ui, dubbing_project as dp
+    p = dp.build_project("1\n00:00:01,000 --> 00:00:02,000\n你好\n", "chinese", "v0")
+    ui._SUB_CANCEL.clear()
+    upd = ui._stop_sub_gen(p)
+    assert p["id"] in ui._SUB_CANCEL
+    val = upd.get("value") if isinstance(upd, dict) else getattr(upd, "value", "")
+    assert "停止" in val
+    assert upd.get("interactive") is False or getattr(upd, "interactive", None) is False
+    ui._SUB_CANCEL.clear()
+
+
+def test_generate_all_iter_stops_between_cues(monkeypatch, tmp_path):
+    from app import dubbing_project as dp
+    monkeypatch.setattr(dp.config, "OUTPUTS_DIR", tmp_path)
+    srt = ("1\n00:00:01,000 --> 00:00:02,000\n你好\n\n"
+           "2\n00:00:03,000 --> 00:00:04,000\n世界\n")
+    p = dp.build_project(srt, "chinese", "v0")
+    done = []
+    def _fake_cue(project, idx, seed_override=None):
+        done.append(idx)
+        project["cues"][idx]["status"] = "ok"
+        return project
+    monkeypatch.setattr(dp, "generate_cue", _fake_cue)
+    frames = list(dp.generate_all_iter(p, cancel_check=lambda: len(done) >= 1))
+    assert done == [0]                 # 第一条后取消，第二条不再开始
+    assert frames == [(1, 2)]          # 已完成的进度仍上报
+    assert p["cues"][1]["status"] == "pending"
+
+
+def test_run_sub_gen_all_warns_failed_cues(monkeypatch, tmp_path):
+    from app import ui, dubbing_project as dp
+    monkeypatch.setattr(dp.config, "OUTPUTS_DIR", tmp_path)
+    p = dp.build_project("1\n00:00:01,000 --> 00:00:02,000\n你好\n", "chinese", "v0")
+    ui._SUB_CANCEL.clear()
+    def _fake_iter(proj, progress_cb=None, cancel_check=None):
+        proj["cues"][0]["status"] = "error"
+        yield 1, 1
+    monkeypatch.setattr(ui._dub, "generate_all_iter", _fake_iter)
+    warnings, infos = [], []
+    monkeypatch.setattr(ui.gr, "Warning", lambda msg: warnings.append(msg))
+    monkeypatch.setattr(ui.gr, "Info", lambda msg: infos.append(msg))
+    frames = list(ui._run_sub_gen_all(p, "auto"))
+    assert warnings and "生成失败" in warnings[0]
+    assert len(frames[-1]) == 5        # 新增停止按钮输出后仍保持完整帧
+    assert _btn_interactive(frames[1][0]) is False   # 逐条刷新期间生成按钮不能重新启用
+    assert _btn_interactive(frames[-1][0]) is True   # 收尾帧才复位
+    assert p["id"] not in ui._SUB_CANCEL

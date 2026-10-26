@@ -59,9 +59,10 @@ easyvoice/
 │   ├── presets.py        # Preset management (save / load parameter sets)
 │   ├── seed.py           # First-run sample voices / presets
 │   ├── tts_engine.py     # TTS engine (load, synthesize, chunking, subtitle align, speed, model select)
-│   ├── dubbing_project.py# Subtitle-dubbing project state (speaker detect / per-cue gen·reroll / assemble)
+│   ├── dubbing_project.py# Subtitle-dubbing project state (speaker detect / per-cue gen·reroll·cancel / assemble)
 │   ├── video_mux.py      # Mux dubbed audio into video (ffmpeg)
 │   └── ui.py             # Gradio UI (four tabs)
+├── AGENTS.md             # Working conventions — read before touching code
 ├── app_main.py           # Entry point
 ├── build.ps1             # Bundle builder (conda-pack runtime + model + ffmpeg)
 ├── Start EasyVoice.bat   # Windows launcher

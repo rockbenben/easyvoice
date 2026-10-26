@@ -1,19 +1,20 @@
 # 易声 (EasyVoice)
 
-> 基于 Qwen3-TTS 的本地多语言傻瓜配音 / 声音克隆工具，中文界面、开箱即用
+> 基于 Qwen3-TTS 的本地多语言配音 / 声音克隆工具，录一段声音即可朗读任意文本
 
 [English](README.en.md) · **简体中文**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/rockbenben/easyvoice)](https://github.com/rockbenben/easyvoice/releases/latest) [![Powered by Qwen3-TTS](https://img.shields.io/badge/Powered%20by-Qwen3--TTS-orange.svg)](https://github.com/QwenLM/Qwen3-TTS) [![365 开源计划 #018](https://img.shields.io/badge/365%20%E5%BC%80%E6%BA%90%E8%AE%A1%E5%88%92-%23018-1f6feb)](https://github.com/rockbenben/365opensource)
 
-![易声 EasyVoice —— 把文字，说出来](assets/brand/social-card.png)
+![配音页实拍：选好音色、写入文字、点生成后即可播放结果](assets/brand/screenshot.png)
 
 ## 项目简介
 
-**易声(EasyVoice)** 是一个基于 [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) 的本地**多语言**傻瓜配音 / 声音克隆工具（中文界面，开箱即用），特点如下：
+**易声(EasyVoice)** 是一个基于 [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) 的本地**多语言**配音 / 声音克隆工具，特点如下：
 
-- **3 秒声音克隆**：上传或录制约 3 秒参考音频，即可克隆出该音色，用于任意文本 / 字幕配音
+- **声音克隆**：上传或录制一段参考音频（界面提示约 10 秒清晰人声），即可克隆出该音色，用于任意文本 / 字幕配音
 - **多语言配音**：支持中文、英文、日文、韩文、德文、法文、俄文、葡萄牙文、西班牙文、意大利文共 **10 种语言**，默认「自动识别语种」，也可手动指定
+- **界面三语**：简体 / 繁體 / English 随浏览器语言自动切换，右上角也可手动选
 - **省心**：配音参数（语言 / 音色 / 风格 / 语速等）自动记忆，下次打开沿用
 - **字幕配音（多角色）**：上传字幕（SRT / VTT / LRC），按行首「名字：」前缀自动分配说话人音色、逐条试听 / 改词 / 重录，按时间轴对齐生成，并可直接合进原视频（导出成片 + 对齐字幕）。无说话人前缀的普通字幕同样支持（单一音色）；正文含冒号时可关闭「字幕含说话人前缀」开关避免误拆。手头只有音视频、还没有字幕？用 [funasr-subtitle](https://github.com/rockbenben/funasr-subtitle) 先转出 `.srt`
 - **本地运行**：全程本地推理，不上传云端，保护隐私
@@ -56,9 +57,9 @@
 启动后自动打开浏览器 `http://127.0.0.1:7860`（该端口被占用时会自动改用备用端口，以命令行窗口里显示的地址为准），共四个标签页：
 
 - **配音**：输入文本，选择语言（默认自动）与参考音色，点击生成
-- **字幕配音**：上传字幕 → 按说话人分配音色 → 逐条挑错（试听 / 改词 / 重录）→ 合成导出（可合进原视频）
 - **我的音色库**：上传或录制参考音色并管理（添加、删除、重命名、调序、试听）
-- **常用方案**：保存常用的配音参数预设（语言 + 音色），快速调用
+- **常用方案**：保存常用的配音参数预设（语言 + 音色 + 风格 + 语速），快速调用
+- **字幕配音**：上传字幕 → 按说话人分配音色 → 逐条挑错（试听 / 改词 / 重录，批量生成可随时停止）→ 合成导出（可合进原视频）
 
 > **退出**：用完后**关闭启动时弹出的命令行窗口**即可退出（⚠️ 仅关浏览器不会退出，服务仍在后台占用内存与端口）；也可点界面右下角的「退出」按钮。
 
@@ -94,4 +95,6 @@
 
 ## 关于 365 开源计划
 
-[365 开源计划](https://github.com/rockbenben/365opensource) 的第 **#018** 个项目——一个人 + AI，一年 300+ 个开源项目。[提交你的需求 →](https://365.aishort.top/) · [Discord](https://discord.gg/PZTQfJ4GjX) · [Telegram](https://t.me/aishort_top)
+[365 开源计划](https://github.com/rockbenben/365opensource) 的第 **#018** 个项目——一个人 + AI，一年 300+ 个开源项目。
+
+[提交你的需求 →](https://365.aishort.top/) · [Discord](https://discord.gg/PZTQfJ4GjX) · [Telegram](https://t.me/aishort_top)

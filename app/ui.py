@@ -1,3 +1,4 @@
+import re
 import gradio as gr
 from app import config, i18n, voice_library, presets, tts_engine
 from app import dubbing_project as _dub, video_mux as _vmux
@@ -12,6 +13,11 @@ HEAD = (
     'family=Noto+Sans+SC:wght@400;500;700&'
     'family=Noto+Serif+SC:wght@400;700;900&'
     'family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">'
+    # Gradio 会把 css= 里的 @media 规则统一挂到 .contain 下，无法改到它的祖先
+    # .main.fillable（手机端的大块内边距把整页挤窄、裁掉 hero 芯片）。HEAD 里的
+    # style 不经过这层作用域，用来只修这一条结构性内边距。
+    '<style>@media (max-width:860px){.main.fillable{'
+    'padding-left:0!important;padding-right:0!important;}}</style>'
     # (1) Force light theme (deliberately light celadon design; dark mode breaks it).
     # (2) Manual UI language: persist ?__lang= to localStorage and keep it in the URL
     #     (so the server-side relabel sees it); reflect on <html data-uilang> for the
@@ -317,12 +323,12 @@ html[data-uilang="en"] .ev-lang .lang-en{ background:#fff!important; color:var(-
 .ev-footer .ev-more a:hover{ text-decoration:underline;}
 
 /* ── 页脚行：GitHub/更多作品 与「退出」同排（退出不再孤悬右下角）；
-   分隔线画在本行、横跨整宽，退出与文字同基线（E5） ─ */
+   分隔线画在本行、横跨整宽，退出与文字同基线 ─ */
 .ev-footrow{ align-items:center!important; justify-content:space-between!important;
   flex-wrap:wrap!important; margin:30px 0 0!important;
   border-top:1px solid var(--line); padding-top:16px;}
 
-/* ── 只读字幕表：去掉 Gradio 的可编辑错觉 chrome（C2/C3）。
+/* ── 只读字幕表：去掉 Gradio 的可编辑错觉 chrome。
    绿框实为选中格内层 span.text 的 jade inset shadow（computed 取证），手柄是
    .selection-button；剥掉后选中态只由整行淡色高亮表意。 ── */
 .gradio-container .ev-subtable .cell-selected .text{ box-shadow:none!important;}
@@ -330,12 +336,12 @@ html[data-uilang="en"] .ev-lang .lang-en{ background:#fff!important; color:var(-
 .gradio-container .ev-subtable .cell-selected button{ display:none!important;}
 .gradio-container .ev-subtable .toolbar{ display:none!important;}
 
-/* ── 行内试听播放器：只为听一遍，藏倍速/快退/快进（E4） ── */
+/* ── 行内试听播放器：只为听一遍，藏倍速/快退/快进 ── */
 .gradio-container .ev-vaudio button.playback,
 .gradio-container .ev-vaudio button.rewind,
 .gradio-container .ev-vaudio button.skip{ display:none!important;}
 
-/* ── 音频组件标签统一放框外上方，与其它输入一致（W1） ── */
+/* ── 音频组件标签统一放框外上方，与其它输入一致 ── */
 .gradio-container .ev-audio [data-testid="block-label"]{ position:static!important;
   transform:none!important; background:transparent!important; padding:0 0 6px 2px!important;}
 .gradio-container .ev-exit{ background:#FBECEA!important; border:1px solid #F0C9C0!important;
@@ -352,6 +358,9 @@ html[data-uilang="en"] .ev-lang .lang-en{ background:#fff!important; color:var(-
   .ev-mark{ font-size:200px; bottom:-52px;}
   .ev-hero{ padding:24px 22px;}
   .gradio-container{ padding:0 14px 40px!important;}
+  /* 5 个图标按钮各占 44px，名字只能被压成一字一行；窄屏把名字单独放一行。 */
+  .ev-vrow:has(.ev-vrow-play){ flex-wrap:wrap!important;}
+  .ev-vrow:has(.ev-vrow-play) .ev-vname{ flex:1 1 100%!important;}
 }
 """
 
@@ -536,13 +545,18 @@ def do_exit(request: gr.Request = None):
 def do_generate(text, lang, voice_id, temperature=0.9, top_p=0.9, speed=1.0,
                 top_k=50, repetition_penalty=1.0, max_new_tokens=2048, seed=0,
                 model="auto", request: gr.Request = None, progress=gr.Progress()):
-    if not text or not voice_id:
-        raise gr.Error(i18n.t(_req_tb(request), "err.need_text_voice"))
+    tb = _req_tb(request)
+    has_text = bool((text or "").strip())
+    if not has_text and not voice_id:
+        raise gr.Error(i18n.t(tb, "err.need_text_voice"))
+    if not has_text:
+        raise gr.Error(i18n.t(tb, "err.need_text"))
+    if not voice_id:
+        raise gr.Error(i18n.t(tb, "err.need_voice"))
     try:
         ref = voice_library.get_audio_path(voice_id)
     except KeyError:
-        raise gr.Error(i18n.t(_req_tb(request), "err.voice_missing"))
-    tb = _req_tb(request)
+        raise gr.Error(i18n.t(tb, "err.voice_missing"))
     cb = _mk_progress_cb(progress, tb, "prog.chars")    # 实时进度："已生成 X/Y 字"
     try:
         return tts_engine.synthesize(
@@ -550,11 +564,16 @@ def do_generate(text, lang, voice_id, temperature=0.9, top_p=0.9, speed=1.0,
             top_k=int(top_k), repetition_penalty=repetition_penalty,
             max_new_tokens=int(max_new_tokens), seed=int(seed or 0),
             model=model, progress_cb=cb)
-    except Exception:
+    except Exception as e:
         import os
         if not os.path.exists(ref):        # 生成途中所选音色被删 → 文件消失，给友好提示而非原始异常
-            raise gr.Error(i18n.t(tb, "err.voice_missing"))
-        raise                              # 其它真实错误原样冒泡，不掩盖
+            raise gr.Error(i18n.t(tb, "err.voice_missing")) from e
+        low = str(e).lower()
+        if ("out of memory" in low or "cublas_status_alloc_failed" in low
+                or re.search(r"\boom\b", low)):
+            raise gr.Error(i18n.t(tb, "err.gen_oom")) from e
+        # 原始异常仍留在启动窗口日志；界面只给用户可行动的文案，不弹裸 traceback。
+        raise gr.Error(i18n.t(tb, "err.gen_failed")) from e
 
 
 def do_apply_style(style):
@@ -593,18 +612,20 @@ def _loc_tok_estimate(tokens, request: gr.Request):
 _CPS = 4.0   # 中文 TTS 粗估语速（字/秒）；只求量级正确的前置反馈，不承诺精确
 
 
-def do_text_count(text, max_tokens, request: gr.Request = None):
-    """输入文本的实时字数 + 预计时长；超出当前「最大生成长度」档位时变红提示。"""
+def do_text_count(text, request: gr.Request = None):
+    """输入文本的实时字数 + 预计总时长；长文提示会自动分段，而不是误报"超出档位"。"""
     tb = _req_tb(request)
     n = len((text or "").strip())
     if not n:
         return gr.update(visible=False)
     secs = n / _CPS
-    msg = i18n.t(tb, "field.text_count").replace("{n}", str(n)).replace("{s}", f"{secs:.0f}")
-    cap_sec = float(max_tokens or 2048) / _TOK_PER_SEC
-    if secs > cap_sec:
-        msg += " · " + i18n.t(tb, "field.text_over").replace("{m}", f"{cap_sec / 60:.0f}")
-        return gr.update(value="⚠️ " + msg, visible=True)
+    if secs >= 60:
+        msg = (i18n.t(tb, "field.text_count_min")
+               .replace("{n}", str(n)).replace("{m}", f"{secs / 60:.1f}"))
+    else:
+        msg = i18n.t(tb, "field.text_count").replace("{n}", str(n)).replace("{s}", f"{secs:.0f}")
+    if n > tts_engine._SPLIT_THRESHOLD:
+        msg += " · " + i18n.t(tb, "field.text_auto")
     return gr.update(value=msg, visible=True)
 
 
@@ -654,17 +675,23 @@ def do_save_preset(name, lang, voice_id, temperature, top_p, speed, pbump=0,
         })
     except ValueError as e:
         raise gr.Error(str(e))   # 命名冲突等 → 走标准错误弹窗，而非原始异常
-    return gr.update(choices=presets.list_presets()), pbump + 1  # -> (配音方案下拉, 管理列表重渲染)
+    saved = name.strip()
+    gr.Info(i18n.t(_req_tb(request), "preset.saved").replace("{name}", saved))
+    # 保存即选中：当前参数就是这份方案的参数，下拉显示它不会说谎。
+    return gr.update(choices=presets.list_presets(), value=saved), pbump + 1  # -> (配音方案下拉, 管理列表重渲染)
 
 
-def do_preset_delete(name, pbump):
+def do_preset_delete(name, pbump, current=None):
     presets.delete_preset(name)
-    return pbump + 1, None, gr.update(choices=presets.list_presets())  # 重渲染 / 清待确认 / 刷新下拉
+    # 只清掉被删的那份；删别的方案时不要动配音页当前显示的选择。
+    value = None if current == name else current
+    return pbump + 1, None, gr.update(choices=presets.list_presets(), value=value)  # 重渲染 / 清待确认 / 刷新下拉
 
 
 def do_apply_preset(name, request: gr.Request = None):
     if not name:
-        raise gr.Error(i18n.t(_req_tb(request), "err.need_preset"))
+        # 用户手动调参时下拉会被清空，这会触发 change；空值是无操作，不是错误。
+        return (gr.update(),) * 6
     p = presets.get_preset(name)
     temp = p.get("temperature", 0.9)
     return (
@@ -707,7 +734,7 @@ def do_preset_summary(name, tb_lang="zh-Hans"):
     stylekey = _temp_to_style_key(p.get("temperature", 0.9))
     slabel = i18n.t(tb, "style." + stylekey)
     speed = p.get("speed", 1.0)
-    # 标点随界面语言：英文界面不配全角「：」「｜」（C4）
+    # 标点随界面语言：英文界面不配全角「：」「｜」
     en = tb_lang == "en"
     colon = ": " if en else "："
     sep = " · " if en else "　｜　"
@@ -781,6 +808,10 @@ def _run_generate(text, lang, voice_id, temperature=0.9, top_p=0.9, speed=1.0,
 # 改同一字幕工程(gr.State dict)的 handler 共享此 concurrency_id → Gradio queue 串行，
 # 防并发改 project 竞态。字符串重复易打错(错了会静默各排各的队)，统一用常量。
 _SUB_CC = "ev_sub_project"
+# 批量生成可被「停止生成」中止：按 project id 记录取消请求。停止事件不挂 _SUB_CC，
+# 避免排在整批生成后面才执行；project id 每个解析结果唯一。
+_SUB_CANCEL = set()
+_SUB_STOP_CC = "ev_sub_stop"
 
 
 def _sub_table(project):
@@ -815,19 +846,24 @@ def do_sub_parse(file_path, lang, voice_id, detect_speakers=True, request: gr.Re
         raise gr.Error(i18n.t(_req_tb(request), "err.no_cues"))
     project["loc"] = _lang_from_request(request)          # 状态列/按钮计数按此语言本地化
     tb = _req_tb(request)
+    mins = max((c["end"] for c in project["cues"]), default=0) / 60.0
+    done = (i18n.t(tb, "sub.parsed_done")
+            .replace("{n}", str(len(project["cues"]))).replace("{m}", f"{mins:.1f}"))
+    if project.get("dropped"):
+        done += " · " + i18n.t(tb, "sub.dropped").replace("{d}", str(project["dropped"]))
     return (project, gr.update(value=_sub_table(project)),
             None,                                              # 重置选中行(避免对短字幕用旧 idx 触发 KeyError)
             gr.update(value="", placeholder=i18n.t(tb, "sub.select_hint")),  # 清空编辑文本
             gr.update(choices=list(project["speakers"].keys()), value=None),  # 重置角色下拉
             None,                                              # 清空试听
             _gen_btn(project),                                 # 生成全部(带待生成计数)
-            gr.update(interactive=False),                      # 保存/重录：等点选行才激活(U10)
+            gr.update(interactive=False),                      # 保存/重录：等点选行才激活
             gr.update(interactive=False),
             gr.update(visible=True),                           # 第②段：角色配音+状态表+编辑面板
             gr.update(visible=True),
-            gr.update(visible=False),                          # 第③段：合成导出区，生成过内容后才出现(U2)
-            gr.update(visible=True),                           # 右列整卡随 stage② 出现（C1 空壳条）
-            gr.update(visible=True))                           # 解析摘要条有内容才现身（C1）
+            gr.update(visible=False),                          # 第③段：合成导出区，生成过内容后才出现
+            gr.update(visible=True),                           # 右列整卡随第②段一起出现，不留空壳卡
+            gr.update(value=done, visible=True))               # 解析后的摘要（替换上传时的"点解析继续"）
 
 
 def do_sub_select(project, evt: gr.SelectData, request: gr.Request = None):
@@ -863,13 +899,34 @@ def do_sub_edit_text(project, idx, text, speaker, request: gr.Request = None):
     return project, gr.update(value=_sub_table(project)), _gen_btn(project)
 
 
-def do_sub_reroll(project, idx, model_pref="auto", request: gr.Request = None):
+def _cue_has_unsaved_edit(project, idx, edit_text, edit_speaker):
+    """选中的这条在编辑面板里改了字/角色、但还没点「保存」→ True。
+    生成与重录都只读已保存的台词；悄悄用旧文本出音频，用户会以为改动已生效。"""
+    if project is None or idx is None:
+        return False
+    try:
+        cue = _dub._cue(project, int(idx))
+    except KeyError:
+        return False
+    # 归一方式必须和 set_cue_text / set_cue_speaker 一致（都 strip），
+    # 否则保存成功后仍会被判成未保存，把好端端的点击挡在门外。
+    spk = (edit_speaker or "").strip()
+    return ((edit_text or "").strip() != (cue["text"] or "").strip()
+            or bool(spk and spk != cue["speaker"]))
+
+
+def do_sub_reroll(project, idx, model_pref="auto", edit_text=None, edit_speaker=None,
+                  request: gr.Request = None):
     """重录选中条（新随机种子），刷新试听与状态表。"""
     tb = _req_tb(request)
     if project is None:
         raise gr.Error(i18n.t(tb, "err.no_project"))
     if idx is None:
         raise gr.Error(i18n.t(tb, "sub.select_hint"))
+    if _cue_has_unsaved_edit(project, idx, edit_text, edit_speaker):
+        # 「重录」和「保存」挨在同一行，手滑点错的代价是拿到旧词的音频。
+        gr.Warning(i18n.t(tb, "sub.unsaved"))
+        return project, gr.update(), gr.update(), gr.update()
     project.setdefault("params", {})["model"] = model_pref
     _dub.reroll_cue(project, int(idx))
     c = _dub._cue(project, int(idx))
@@ -877,23 +934,62 @@ def do_sub_reroll(project, idx, model_pref="auto", request: gr.Request = None):
             _gen_btn(project))
 
 
-def _run_sub_gen_all(project, model_pref="auto", request: gr.Request = None, progress=gr.Progress()):
-    """生成全部（生成器）：禁用→逐条生成报进度→复位；出错也复位。
-    全部生成成功后揭开第③段「合成导出」（渐进式，U2）。"""
+def _stop_sub_gen(project, request: gr.Request = None):
+    """请求停止当前字幕批次；正在合成的当前条会先完成，随后在条间停下。"""
+    tb = _req_tb(request)
+    if project:
+        _SUB_CANCEL.add(project["id"])
+    return gr.update(value=i18n.t(tb, "btn.stopping"), interactive=False)
+
+
+def _run_sub_gen_all(project, model_pref="auto", edit_text=None, edit_speaker=None,
+                     sel_idx=None, request: gr.Request = None, progress=gr.Progress()):
+    """生成全部（生成器）：禁用→逐条生成并刷新状态→复位；出错也复位。
+    全部生成成功后揭开第③段「合成导出」（渐进式）；可中途停止。"""
     tb = _req_tb(request)
     busy = gr.update(value=i18n.t(tb, "btn.generating"), interactive=False)
+    stop_hidden = gr.update(visible=False)
     if project is None:
         raise gr.Error(i18n.t(tb, "err.no_project"))
-    yield busy, gr.update(), project, gr.update()
+    idle = _gen_btn(project)
+    if _cue_has_unsaved_edit(project, sel_idx, edit_text, edit_speaker):
+        # 编辑面板里的字还没点「保存」：直接生成会读旧台词，用户却以为已改。
+        gr.Warning(i18n.t(tb, "sub.unsaved"))
+        yield idle, gr.update(), project, gr.update(), stop_hidden
+        return
+    if not any(c["status"] != "ok" for c in project["cues"]):
+        gr.Info(i18n.t(tb, "sub.all_done"))
+        yield idle, gr.update(), project, gr.update(), stop_hidden
+        return
+    _SUB_CANCEL.discard(project["id"])
+    yield (busy, gr.update(), project, gr.update(),
+           gr.update(value=i18n.t(tb, "sub.stop"), visible=True, interactive=True))
     try:
         project.setdefault("params", {})["model"] = model_pref
-        _dub.generate_all(project,
-                          progress_cb=_mk_progress_cb(progress, tb, "prog.cues"))
+        cb = _mk_progress_cb(progress, tb, "prog.cues")
+        for _done, _total in _dub.generate_all_iter(
+            project, progress_cb=cb,
+            cancel_check=lambda: project["id"] in _SUB_CANCEL,
+        ):
+            # 每条完成都刷新状态表，长任务不再整批停在"待生成"；按钮保持禁用，
+            # 不能用 _gen_btn（它总是 interactive=True），否则批次中途可再次点击。
+            yield (busy, gr.update(value=_sub_table(project)),
+                   project, gr.update(), gr.update())
     except Exception:
-        yield _gen_btn(project), gr.update(), project, gr.update()
+        _SUB_CANCEL.discard(project["id"])
+        yield _gen_btn(project), gr.update(), project, gr.update(), stop_hidden
         raise
+    stopped = (project["id"] in _SUB_CANCEL
+               and any(c["status"] != "ok" for c in project["cues"]))
+    _SUB_CANCEL.discard(project["id"])
+    if stopped:
+        gr.Info(i18n.t(tb, "sub.stopped"))
+    failed = sum(1 for c in project["cues"] if c["status"] == "error")
+    if failed:
+        gr.Warning(i18n.t(tb, "sub.gen_failed_n").replace("{n}", str(failed)))
     yield (_gen_btn(project), gr.update(value=_sub_table(project)), project,
-           gr.update(visible=any(c["status"] == "ok" for c in project["cues"])))
+           gr.update(visible=any(c["status"] == "ok" for c in project["cues"])),
+           stop_hidden)
            # 全失败时不揭开导出区（揭开了也只能拿到 nothing_generated 报错，徒增困惑）
 
 
@@ -940,7 +1036,7 @@ def do_subtitle_preview(file_path, request: gr.Request = None):
     msg = i18n.t(tb, "sub.parsed").replace("{n}", str(len(cues))).replace("{m}", f"{mins:.1f}")
     if dropped:                                          # 超 6h 上限被丢 → 明示，避免静默缺尾
         msg += " · " + i18n.t(tb, "sub.dropped").replace("{d}", str(dropped))
-    return gr.update(value=msg, visible=True)            # 空壳沙条不再先于内容出现（C1）
+    return gr.update(value=msg, visible=True)            # 有内容才现身，不留空壳条
 
 
 def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
@@ -949,9 +1045,6 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
     _first_voice = next((v["id"] for v in voice_library.list_voices()), None)
     _default_model = "1.7b" if (tts_engine.is_gpu() and tts_engine.has_17b_downloaded()) else "0.6b"
     _preset_names = presets.list_presets()
-    _chinese_default = "新闻播报（中文·稳定）"
-    _default_preset = (_chinese_default if _chinese_default in _preset_names
-                       else (_preset_names[0] if _preset_names else None))
     with gr.Blocks(title="易声 EasyVoice") as demo:   # 标签标题：gr.I18n 不本地化 <title>，用固定品牌名
         hero = gr.HTML(I18N("_hero"))
         _pbump = gr.State(0)        # 常用方案逐行列表重渲染信号(+1 触发)
@@ -964,7 +1057,8 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                     with gr.Column(scale=2, min_width=320):
                         with gr.Group(elem_classes=["ev-card"]):
                             eb_setup = gr.HTML(I18N("_eb_setup"))
-                            dub_preset = gr.Dropdown(_preset_names, value=_default_preset,
+                            # 不预选任何方案：空白才诚实地表示"当前参数不来自某个方案"。
+                            dub_preset = gr.Dropdown(_preset_names, value=None,
                                                      label=I18N("preset.quick"))
                             lang_dd = gr.Dropdown(_lang_choices(), label=I18N("field.lang"),
                                                   info=I18N("field.lang_info"), value="auto")
@@ -1002,7 +1096,7 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                                       elem_classes=["ev-tokest"])
                                 seed_in = gr.Number(value=0, precision=0, minimum=0,
                                                     label=I18N("adv.seed"), info=I18N("adv.seed_info"))
-                            # 保存方案是低频动作：折进次级折叠，缩短左列（U3）
+                            # 保存方案是低频动作：折进次级折叠，缩短左列
                             with gr.Accordion(I18N("preset.save_title"), open=False,
                                               elem_classes=["ev-acc"]) as save_acc:
                                 dub_pname = gr.Textbox(label=I18N("preset.name"),
@@ -1020,11 +1114,14 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                             audio_out = gr.Audio(label=I18N("field.result"), elem_classes=["ev-audio"])
                 style_radio.change(do_apply_style, style_radio, [temperature, top_p],
                                    show_progress="hidden")
+                # 手动改任一"方案内"参数 → 清空方案选择。否则下拉会一直显示某个
+                # 方案名，而实际参数已经是用户改过的，且再选同一方案也不会触发套用。
+                def _clear_preset_choice():
+                    return gr.update(value=None)
+                for _c in (lang_dd, voice_dd, style_radio, speed, temperature, top_p):
+                    _c.input(_clear_preset_choice, None, dub_preset, show_progress="hidden")
                 max_tokens.change(_loc_tok_estimate, max_tokens, tok_est, show_progress="hidden")
-                _tc = dict(inputs=[text_in, max_tokens], outputs=text_count,
-                           show_progress="hidden")
-                text_in.change(do_text_count, **_tc)     # 字数/档位前置反馈（E3）
-                max_tokens.change(do_text_count, **_tc)  # 换档后重新判定是否超档
+                text_in.change(do_text_count, text_in, text_count, show_progress="hidden")
                 gen.click(_run_generate,                                    # 禁用→生成→复位(出错也复位)
                           [text_in, lang_dd, voice_dd, temperature, top_p, speed,
                            top_k, rep_pen, max_tokens, seed_in, model_radio],
@@ -1089,8 +1186,10 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                         no.click(lambda: None, None, [_pending])
                                     elif vid == editing:                     # 编辑态：只改名称(按钮另起一行)
                                         with gr.Group(elem_classes=["ev-editbox"]):
+                                            # 同上：动态渲染的输入框必须显式 interactive，否则无法改名。
                                             e_nm = gr.Textbox(v["name"], show_label=False,
-                                                              container=False, elem_classes=["ev-edit"])
+                                                              container=False, interactive=True,
+                                                              elem_classes=["ev-edit"])
                                             with gr.Row(elem_classes=["ev-editbtns"]):
                                                 sv = gr.Button(i18n.t(vtb, "edit.save"),
                                                                variant="primary", scale=1, min_width=72)
@@ -1109,7 +1208,7 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                             up = gr.Button("↑", scale=0, min_width=44, interactive=(i > 0))
                                             dn = gr.Button("↓", scale=0, min_width=44, interactive=(i < n - 1))
                                             dl = gr.Button("🗑", scale=0, min_width=44)
-                                        # 播放器默认收起，点 ▶ 才展开本行（U1：整页从 ~1200px 缩到 ~300px）
+                                        # 播放器默认收起，点 ▶ 才展开本行
                                         gr.Audio(voice_library.get_audio_path(vid), interactive=False,
                                                  show_label=False, container=False,
                                                  visible=(vid == opened),
@@ -1153,8 +1252,8 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                     yes = gr.Button(i18n.t(ptb, "voice.del_yes"),
                                                     variant="stop", scale=1, min_width=72)
                                     no = gr.Button(i18n.t(ptb, "voice.del_no"), scale=1, min_width=72)
-                                yes.click(lambda b, _n=name: do_preset_delete(_n, b),
-                                          [_pbump], [_pbump, _ppending, dub_preset])
+                                yes.click(lambda b, cur, _n=name: do_preset_delete(_n, b, cur),
+                                          [_pbump, dub_preset], [_pbump, _ppending, dub_preset])
                                 no.click(lambda: None, None, [_ppending])
                             else:                                    # 显示态：名字 + 摘要 + 删除(方案只删不改)
                                 with gr.Row(elem_classes=["ev-vrow"]):
@@ -1196,9 +1295,11 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                     if not project:
                                         return
                                     for spk in project["speakers"].keys():
+                                        # gr.render 生成的控件不会按输入用途自动启用；不写死
+                                        # interactive=True 时角色音色下拉在界面上是禁用的。
                                         dd = gr.Dropdown(_voice_choices(),
                                                          value=project["speakers"].get(spk),
-                                                         label=spk)
+                                                         label=spk, interactive=True)
                                         dd.change(_role_change,
                                                   [dd, _sub_proj], [_sub_proj, sub_table, sub_gen],
                                                   show_progress="hidden", concurrency_id=_SUB_CC)
@@ -1213,6 +1314,8 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                     interactive=False, wrap=True, elem_classes=["ev-subtable"])
                                 sub_gen = gr.Button(I18N("sub.gen_all"), variant="primary",
                                                     elem_id="ev-subgen")
+                                sub_stop = gr.Button(I18N("sub.stop"), variant="secondary",
+                                                     visible=False)
                                 with gr.Group(elem_classes=["ev-card"]):
                                     edit_eb = gr.Markdown(I18N("sub.edit_title"))
                                     edit_text = gr.Textbox(label=I18N("sub.edit_text"), lines=2)
@@ -1252,17 +1355,21 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 edit_apply.click(do_sub_edit_text,
                                  [_sub_proj, _sub_sel, edit_text, edit_speaker],
                                  [_sub_proj, sub_table, sub_gen], concurrency_id=_SUB_CC)
-                edit_reroll.click(do_sub_reroll, [_sub_proj, _sub_sel, sub_model_radio],
+                edit_reroll.click(do_sub_reroll,
+                                  [_sub_proj, _sub_sel, sub_model_radio, edit_text, edit_speaker],
                                   [_sub_proj, sub_table, edit_audio, sub_gen],
                                   concurrency_id=_SUB_CC)
-                sub_gen.click(_run_sub_gen_all, [_sub_proj, sub_model_radio],
-                              [sub_gen, sub_table, _sub_proj, sub_out_grp],
+                sub_gen.click(_run_sub_gen_all,
+                              [_sub_proj, sub_model_radio, edit_text, edit_speaker, _sub_sel],
+                              [sub_gen, sub_table, _sub_proj, sub_out_grp, sub_stop],
                               concurrency_id=_SUB_CC)
+                sub_stop.click(_stop_sub_gen, [_sub_proj], [sub_stop],
+                               show_progress="hidden", concurrency_id=_SUB_STOP_CC)
                 sub_model_radio.change(do_model_hint, sub_model_radio, None, show_progress="hidden")
                 sub_export.click(_run_sub_export, [_sub_proj, sub_video, sub_mux],
                                  [sub_export, sub_audio, sub_srt, sub_video_out],
                                  concurrency_id=_SUB_CC)
-        # 页脚行：GitHub/更多作品 与「退出」同排（U4：退出不再孤悬右下角）
+        # 页脚行：GitHub/更多作品 与「退出」同排，退出不再孤悬右下角
         with gr.Row(elem_classes=["ev-footrow"]):
             footer = gr.HTML(_footer_html(lang))
             exit_btn = gr.Button(I18N("app.exit"), scale=0, min_width=128,
@@ -1334,6 +1441,7 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 sub_table: gr.update(headers=["#", L("sub.col_speaker"),
                                               L("sub.col_text"), L("sub.col_status")]),
                 sub_gen: gr.update(value=L("sub.gen_all")),
+                sub_stop: gr.update(value=L("sub.stop")),
                 edit_eb: gr.update(value=L("sub.edit_title")),
                 edit_text: gr.update(label=L("sub.edit_text")),
                 edit_speaker: gr.update(label=L("sub.edit_speaker")),
