@@ -20,13 +20,13 @@
    dist\EasyVoice-<Ver>.zip       <- archive (for hosting / distribution)
 
  Usage (from the project root, in PowerShell 7 on the base env):
-     pwsh -File build.ps1 -Version v1.1.1
+     pwsh -File build.ps1 -Version v1.1.2
    -Version names the output directory and zip, and MUST be passed explicitly
    when cutting a release: the default below is hardcoded, so omitting it
    produces a directory / zip named after the previous version and overwrites
    that build in dist\.
    Other optional parameters:
-     pwsh -File build.ps1 -Version v1.1.1 -EnvName easyvoice -CondaRoot D:\miniconda3
+     pwsh -File build.ps1 -Version v1.1.2 -EnvName easyvoice -CondaRoot D:\miniconda3
 
  Notes:
    - Run `python app_main.py` successfully once first (confirms the env works).
@@ -41,7 +41,7 @@
 [CmdletBinding()]
 param(
   [string]$EnvName   = "easyvoice",
-  [string]$Version   = "v1.1.1",
+  [string]$Version   = "v1.1.2",
   [string]$CondaRoot = "$env:USERPROFILE\miniconda3",
   [string]$ModelId   = "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
   [ValidateSet("gpu","cpu")][string]$Variant = "gpu"
