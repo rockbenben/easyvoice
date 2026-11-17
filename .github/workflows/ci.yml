@@ -4,18 +4,32 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 分发包只有 Windows 整合包（build.ps1 + Start EasyVoice.bat），此前只在
+        # Linux 上跑测试；两条腿都跑，路径/编码/文件锁这类只在 Windows 暴露的问题才有回归。
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
 
       - name: System deps (libsndfile for soundfile)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libsndfile1
 
       # 测试只用到这几样；torch / qwen-tts 在运行时才惰性导入，单测无需安装（也避免拉 GB 级依赖）
