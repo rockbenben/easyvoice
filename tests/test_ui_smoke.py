@@ -8,6 +8,16 @@ def test_build_ui_returns_blocks(monkeypatch, tmp_path):
     blocks = ui.build_ui("zh-Hans")
     assert isinstance(blocks, gr.Blocks)
 
+def test_build_ui_disables_gradio_telemetry(monkeypatch, tmp_path):
+    from app import config
+    monkeypatch.setattr(config, "VOICES_DIR", tmp_path / "v")
+    monkeypatch.setattr(config, "PRESETS_DIR", tmp_path / "p")
+    monkeypatch.setattr(config, "OUTPUTS_DIR", tmp_path / "o")
+    from app import ui
+    demo = ui.build_ui("zh-Hans")
+    # 本地隐私工具：不得向 api.gradio.app 发遥测，也不做联网版本检查
+    assert demo.analytics_enabled is False
+
 def test_generate_handler_uses_engine(monkeypatch, tmp_path):
     from app import ui, tts_engine, voice_library, config
     monkeypatch.setattr(config, "VOICES_DIR", tmp_path)

@@ -1045,7 +1045,9 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
     _first_voice = next((v["id"] for v in voice_library.list_voices()), None)
     _default_model = "1.7b" if (tts_engine.is_gpu() and tts_engine.has_17b_downloaded()) else "0.6b"
     _preset_names = presets.list_presets()
-    with gr.Blocks(title="易声 EasyVoice") as demo:   # 标签标题：gr.I18n 不本地化 <title>，用固定品牌名
+    # 本地隐私工具：Gradio 默认开启遥测与版本检查（都请求 api.gradio.app），
+    # 与 README 的「不上传云端」承诺相悖，明确关掉。
+    with gr.Blocks(title="易声 EasyVoice", analytics_enabled=False) as demo:   # 标签标题：gr.I18n 不本地化 <title>，用固定品牌名
         hero = gr.HTML(I18N("_hero"))
         _pbump = gr.State(0)        # 常用方案逐行列表重渲染信号(+1 触发)
         _ppending = gr.State(None)  # 待二次确认删除的方案名
