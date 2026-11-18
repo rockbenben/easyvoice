@@ -1,5 +1,7 @@
 # SPIKE: qwen-tts 0.1.1 真实 API 记录
 
+> **已冻结：这是历史调研快照，不随代码更新。** 实现现状以 `app/tts_engine.py` 与 [ARCHITECTURE.md](ARCHITECTURE.md) 为准（例如 ICL/`ref_text` 路径早已移除，生产只用 `x_vector_only_mode=True`）。
+
 **日期：** 2026-06-22  
 **模型：** `Qwen/Qwen3-TTS-12Hz-0.6B-Base`（本地路径 `models/Qwen/Qwen3-TTS-12Hz-0___6B-Base`）  
 **包版本：** qwen-tts 0.1.1 · torch 2.5.1+cu121 · soundfile 0.14.0  

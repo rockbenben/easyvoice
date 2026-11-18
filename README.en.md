@@ -1,97 +1,91 @@
 # EasyVoice (易声)
 
-> A local, multilingual dubbing and voice-cloning tool built on Qwen3-TTS — record a clip, then read any text aloud.
-
-**English** · [简体中文](README.md)
+> Local multilingual dubbing and voice cloning — record a clip, then read any text aloud.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![Release](https://img.shields.io/github/v/release/rockbenben/easyvoice)](https://github.com/rockbenben/easyvoice/releases/latest) [![Powered by Qwen3-TTS](https://img.shields.io/badge/Powered%20by-Qwen3--TTS-orange.svg)](https://github.com/QwenLM/Qwen3-TTS) [![365 Open Source Plan #018](https://img.shields.io/badge/365%20Open%20Source%20Plan-%23018-1f6feb)](https://github.com/rockbenben/365opensource)
 
+[⬇ Download Bundle](../../releases/latest) · [🇨🇳 China Mirror](https://alist.newzone.top:9003/apps/EasyVoice) · [简体中文](README.md)
+
 ![The Dubbing tab: pick a voice, type text, generate and play the result](assets/brand/screenshot.en.png)
 
-## Overview
+Zero setup required — unzip and double-click to launch in your browser. Powered by Qwen3-TTS for 10-language voice cloning and subtitle dubbing, running entirely offline with automatic CUDA acceleration and CPU fallback.
 
-**EasyVoice** is a local, **multilingual** dubbing / voice-cloning tool built on [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS):
+## Supported
 
-- **Voice cloning** — upload or record a reference clip (the UI asks for ~10 s of clean speech) and reuse that voice for any text or subtitle dubbing.
-- **Multilingual** — 10 languages: Chinese, English, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian. Auto-detect by default, or pick manually.
-- **Trilingual interface** — Simplified / Traditional Chinese / English, following the browser language, with a manual switch in the header.
-- **Remembers your settings** — language / voice / style / speed etc. are saved and restored on next launch.
-- **Subtitle dubbing (multi-speaker)** — upload subtitles (SRT / VTT / LRC); voices are auto-assigned per speaker from leading `Name:` prefixes, each line can be previewed / edited / re-rolled, generated timeline-aligned, and muxed straight into your video (dubbed video + aligned subtitles exported). Plain subtitles without prefixes work too (single voice); turn off the _Subtitles have speaker prefixes_ toggle when the text contains colons to avoid mis-splitting. Only have audio/video and no subtitles yet? Run it through [funasr-subtitle](https://github.com/rockbenben/funasr-subtitle) first to get an `.srt`.
-- **Runs locally** — fully local inference, nothing uploaded to the cloud.
-- **GPU-adaptive** — uses CUDA automatically when a GPU is present, falls back to CPU otherwise.
-- **Quality switch (with an NVIDIA GPU)** — manually pick between **Fast 0.6B** and **High 1.7B** models (1.7B auto-downloads on first use); locked to 0.6B without a GPU.
-- **Zero-setup** — end users unzip the all-in-one bundle and double-click to launch; developers can run from source.
+| Dimension | Supported scope & notes |
+|---|---|
+| **Operating System** | Windows 10/11 (all-in-one bundle); macOS / Linux (run from source) |
+| **Hardware** | NVIDIA GPU (auto CUDA acceleration, 0.6B / 1.7B models); CPU fallback (0.6B model) |
+| **Languages** | Chinese, English, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian (10 languages, auto-detect by default) |
+| **Subtitles** | SRT, VTT, LRC (auto speaker-prefix detection; assign a voice per character) |
+| **Reference Audio** | WAV, MP3 and common audio formats (~5–15s of clean single-speaker voice recommended) |
+| **Video Muxing** | MP4 container (supports "replace audio" or "keep background audio with ducking") |
+| **Network** | 100% offline local inference, zero data uploaded. The full bundle ships the model and runs without internet; the CPU lite bundle and first use of 1.7B need internet to download the model |
 
----
+## What it does
 
-## Download
+- **Voice cloning** — Upload or record ~10s of clean speech to clone any voice for speech synthesis and subtitle dubbing.
+- **Multilingual dubbing** — 10 languages (Chinese, English, Japanese, Korean, German, French, Russian, Portuguese, Spanish, Italian) with auto-detection.
+- **Multi-speaker subtitle dubbing** — Import SRT / VTT / LRC; speakers are detected automatically and you assign a voice per character, with per-line preview, editing, re-rolling, and timeline alignment. Only have video? Use [funasr-subtitle](https://github.com/rockbenben/funasr-subtitle) to extract subtitles first.
+- **Direct video export** — Built-in muxing pipeline outputs a finalized MP4 video with synced dubbing and aligned subtitles.
+- **Trilingual UI & remembered presets** — Simplified Chinese / Traditional Chinese / English, auto-detected from the browser, with local persistence for voice, speed, and style settings.
 
-Grab a bundle from **[Releases](../../releases/latest)** — two options:
+## Quick start
 
-> 🇨🇳 **Faster mirror for mainland China**: <https://alist.newzone.top:9003/apps/EasyVoice>
+### 1. Download
 
-| Bundle                         | Size                      | Best for                | Model                                       |
-| ------------------------------ | ------------------------- | ----------------------- | ------------------------------------------- |
-| **Full bundle** (GPU/CPU auto) | ~4.6 GB (3 volumes)       | NVIDIA GPU / max speed  | bundled                                     |
-| **CPU lite bundle**            | **~0.5 GB (single file)** | no GPU / small download | downloaded in-app on first launch (~1.8 GB) |
+Grab a bundle from **[Releases](../../releases/latest)** (or the **[China Mirror](https://alist.newzone.top:9003/apps/EasyVoice)**):
 
-- **Full bundle:** download all three volumes (`.zip.01` / `.02` / `.03`) plus `merge-and-extract.bat` into one folder, then double-click the bat to merge & extract.
-- **CPU lite bundle:** download the zip with `-cpu` in its name and unzip. ⚠️ **CPU generation is slow**: ~20–40 s per sentence (machine-dependent), minutes for long paragraphs — best for short clips/preview. For GPU speed, use the full bundle.
+| Bundle | Size | Recommended hardware | Model |
+|---|---|---|---|
+| **Full bundle** (GPU / CPU auto) | ~4.6 GB (3 volumes) | NVIDIA GPU / fast generation | Bundled 0.6B model |
+| **CPU lite bundle** | ~0.5 GB (single file) | No GPU / lightweight download | Auto-downloads model on first launch (~2.3 GB) |
 
----
+- **Full bundle**: Put all three parts (`.zip.01`, `.zip.02`, `.zip.03`) and `merge-and-extract.bat` in the same directory, then double-click the bat to merge and extract.
+- **CPU lite bundle**: Download the `-cpu` zip and extract.
 
-## For end users (3 steps)
+### 2. Launch
 
-### 1. Download & unzip
+In the extracted folder, double-click **`Start EasyVoice.bat`**. First launch initializes the runtime (~1 min) and then loads the model (~30s); the CPU lite bundle also downloads the model first (~2.3 GB).
 
-Pick a bundle from [Download](#download) above and unzip it locally.
+> [!NOTE]
+> To quit the service, close the command prompt window, or click the on-page "Quit" button in the bottom right corner (closing the browser tab alone does not stop the background process).
 
-### 2. Double-click to launch
+### 3. Generate your first clip
 
-Run `Start EasyVoice.bat` in the folder. The first launch takes ~30s (model loading).
+A browser tab will automatically open at `http://127.0.0.1:7860` (if the port is taken or reserved by the system, the next available one is used):
 
-> **Note:** Double-click launch requires the bundle (which ships its own `runtime/` and model). Prebuilt bundles are in [Download](#download) above. To run from source, or to build a bundle yourself with `build.ps1` (it lives in the source repo), see **[DEVELOPMENT.en.md](DEVELOPMENT.en.md)**.
+1. **Text dubbing**: Type your text in the Text dubbing tab, select a voice and language, and click "Generate";
+2. **My Voices**: Upload or record a short voice clip to add it to your voice library;
+3. **Subtitle Dub**: Drop in an SRT/VTT/LRC subtitle file, assign voices to detected speakers, generate audio, and optionally mux it straight into your original video.
 
-### 3. Use it in the browser
+### Upgrading an existing install
 
-A browser opens automatically at `http://127.0.0.1:7860` (if that port is taken the app falls back to another one — trust the address printed in the console window), with four tabs:
+Each bundle extracts into its own folder. When upgrading, **keep your old directory first**:
 
-- **Dubbing** — type text, pick a language (Auto by default) and reference voice, click generate
-- **My Voices** — upload or record reference voices and manage them (add / delete / rename / reorder / preview)
-- **Presets** — save frequently used parameter presets (language + voice + style + speed) for quick reuse
-- **Subtitle dubbing** — upload subtitles → assign a voice per speaker → fix lines (preview / edit / re-roll, batch generation can be stopped any time) → assemble & export (optionally muxed into your video)
+1. Quit the running old version;
+2. Unzip the new bundle into a new folder;
+3. Copy `voices/` (voice library), `presets/` (presets and key), and `outputs/` (generated results) from the old folder to the same place in the new one. On the CPU lite bundle, copy `models/` as well to skip re-downloading. Verify that the new version works properly before deleting the old folder.
 
-> **To quit:** close the **console window** that opened at launch (⚠️ closing the browser alone won't quit — the server keeps running in the background, holding memory and the port); or click the **Quit** button at the bottom-right of the page.
+## Limitations
 
----
+- **CPU generation is slow** — CPU inference takes ~20–40s per sentence (minutes for paragraphs); best for testing and short clips. For fast long-form dubbing, an NVIDIA GPU is recommended.
+- **Voice clone fidelity depends on reference audio** — Use 5–15 seconds of clean, single-speaker audio without background music or heavy reverb; background noise will degrade output timbre.
+- **Long text is automatically chunked** — Passages exceeding 200 characters are automatically split by punctuation and assembled with 0.25s natural pauses. For long scripts, the Subtitle Dub tab is recommended for cue-level timing control.
 
-## Running from source / building a bundle
+## Running from source
 
-Dev environment setup, project layout and the packaging script are in **[DEVELOPMENT.en.md](DEVELOPMENT.en.md)**.
-
----
+For Linux / macOS usage, secondary development, or custom builds, see **[DEVELOPMENT.en.md](DEVELOPMENT.en.md)**. For system design and architecture decisions, see **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Changelog
 
-Per-release notes are on [Releases](../../releases); changes that are in the source but not yet bundled are in [CHANGELOG.en.md](CHANGELOG.en.md).
+Per-release notes live on [Releases](../../releases/latest); source changes that are not in a bundle build yet are listed in [CHANGELOG.en.md](CHANGELOG.en.md).
 
----
+## License & Credits
 
-## Credits & License
-
-- This project's own code is licensed under the **MIT License** (see [LICENSE](LICENSE)).
-- Built on **[Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS)** (model weights under Apache License 2.0).
-- Licenses and sources of third-party components bundled in the all-in-one package (Qwen3-TTS model / FFmpeg / etc.) are documented in [THIRD-PARTY-NOTICES](assets/packaging/THIRD-PARTY-NOTICES.txt).
-
----
-
-## Resources
-
-- Qwen3-TTS: https://github.com/QwenLM/Qwen3-TTS
-- ModelScope: https://modelscope.cn
-- Gradio: https://www.gradio.app
-
----
+- EasyVoice code is licensed under the **[MIT License](LICENSE)**.
+- Speech synthesis is powered by **[Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS)** (Apache License 2.0).
+- Third-party component licenses in all-in-one bundles are documented in **[THIRD-PARTY-NOTICES](assets/packaging/THIRD-PARTY-NOTICES.txt)**.
 
 ## About the 365 Open Source Plan
 

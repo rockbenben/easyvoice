@@ -8,7 +8,7 @@
 单机本地的 Gradio 应用，基于 Qwen3-TTS 做声音克隆 + 多语言配音。全程本地推理，不上云。
 
 - **入口** `app_main.py::main()`：建目录 → 把随包 `ffmpeg/` 前置进 `PATH` → 确保 0.6B 模型（缺则下载）→ 播种示例音色/预设 → `build_ui()` → 后台线程预热模型 → `demo.launch()` 起本地服务（默认端口 7860，被占用/被系统保留时自动回退到备用端口，见 4.8），`allowed_paths=[outputs, voices]`（否则 Gradio 拒绝外发本地音频）。
-- **四个标签页**（`app/ui.py`）：配音 · 我的音色库 · 常用方案 · 字幕配音。
+- **四个标签页**（`app/ui.py`）：文本配音 · 字幕配音 · 我的音色库 · 常用方案。
 - **数据落盘**：`voices/`（音色库 + `index.json`）、`presets/`（每方案一个 JSON）、`outputs/`（生成结果）、`models/`（权重）；均在 `.gitignore` 里。
 
 ## 2. 模块职责
@@ -47,8 +47,8 @@
 Gradio `demo.queue()` 默认 `default_concurrency_limit=1`：**同 `concurrency_id`** 的事件串行，**不同 id** 可并行。
 - **字幕同工程串行**：解析/改词/重录/生成全部/导出共享 `concurrency_id=_SUB_CC`（常量，值 `"ev_sub_project"`），避免并发改同一 `gr.State` 工程 dict 造成状态错乱/导出错乱。用常量而非字面量：id 拼错不会报错，只会让该 handler 悄悄排进另一条队，串行保证静默失效。测试用结构化断言兜底——凡写 `_sub_proj` 的 handler 必须共用同一 id。
 - **停止生成挂在另一条队**：`_stop_sub_gen` 只**读**工程态（取 `project["id"]` 记进 `_SUB_CANCEL`），不写，故不属上一条的「写者」集合；它必须用**不同**的 `concurrency_id`（`_SUB_STOP_CC`）——挂 `_SUB_CC` 会被排到整批生成之后才执行，用户点了停止却要等批次跑完。取消标记按 project id 记录（每次解析都是新 id），批次开始前先 `discard`，避免上一轮的标记误停这一轮。
-- **GPU 前向串行**：配音 Tab 与字幕 Tab 的生成事件 id 不同、可被同时调度，故在引擎层用进程级 `_INFER_LOCK` 裹住 `generate_voice_clone` 调用（唯一副本在 `_raw_synthesize` 内，于 `_load` 之后取锁，不与 `_LOAD_LOCK` 嵌套，无死锁），避免并发前向致显存翻倍 OOM / CUDA 竞争。
-- 模型缓存 `_LOAD_LOCK` 双检锁：预热线程与首个生成请求不会重复加载。
+- **推理和冷加载串行**：配音与字幕可同时调度，模型冷加载和前向共用 `_INFER_LOCK`，防止并发操作扰动默认随机状态。模型缓存仍在锁内双检，预热线程与首个请求不会重复加载。前向完成后按段释放锁。
+- **固定种子按请求隔离**：每次前向在锁内恢复该请求自己的 Torch CPU 和所用 CUDA 设备的随机状态，采样后保存进度供下一段使用，并恢复进程原有状态。`seed=0` 沿用进程随机序列。
 
 ### 4.2 模型档位
 `resolve_model_pref(pref)` 是设备/默认档的**唯一策略源**：CPU 恒 0.6B（忽略 pref）；GPU 下 `auto`=有 1.7B 就用否则 0.6B，`0.6b`/`1.7b` 照选。它只做判断、不下载。
@@ -58,11 +58,11 @@ Gradio `demo.queue()` 默认 `default_concurrency_limit=1`：**同 `concurrency_
 ### 4.3 说话人前缀识别 + 开关
 `SPEAKER_RE` 只把「**单个词**（不含空白/冒号）、≤20 字、且**非纯数字**」的行首前缀当说话人——避免把普通字幕里的冒号（`12:30`、`Note:`、URL）误当说话人而吞掉正文。另有「字幕含说话人前缀」开关（默认开），可对含冒号的普通字幕一键关闭识别、整行按单一音色配音。
 
-### 4.4 视频合成——保留视频完整长度
-配音常短于视频（末句字幕多在片尾前）。替换原声分支用 `-af apad` 把配音补静音到无限长，再由 `-shortest` 收到视频长度 → 输出恒等于视频时长（短则补静音到片尾、长则按视频截）。保留原声分支由原声轨 `amix=duration=longest` 锚定长度。ffmpeg 缺失/失败 → `mux` 返回 `None`，UI 降级为只给「音频 + 字幕」并 `gr.Warning`。
+### 4.4 视频合成——保留视频完整长度与音轨容错
+配音常短于视频（末句字幕多在片尾前）。替换原声分支用 `-af apad` 把配音补静音到无限长，再由 `-shortest` 收到视频长度 → 输出恒等于视频时长（短则补静音到片尾、长则按视频截）。保留原声分支由原声轨 `amix=duration=longest,apad` 锚定长度，并使用显式流选择 `[0:a:0]` 与 `[1:a:0]`。针对无音轨的静音原视频，若保留原声因 `matches no streams` 失败，会自动降级为替换原声重新执行，避免报错中断。ffmpeg 缺失/失败 → `mux` 返回 `None`，UI 降级为只给「音频 + 字幕」并 `gr.Warning`。
 
 ### 4.5 参数持久化 ↔ 风格
-配音设置——语言 / 音色 / 风格 / 语速 / top_k / 重复惩罚 / 最大长度 / 种子 / 模型——存 `gr.BrowserState`（浏览器 localStorage）。**唯独不持久化 temperature/top_p**：它们由「风格」经 `do_apply_style` 派生，只需持久化风格，重载时恢复风格→重算二者（避免独立持久化引发的覆盖循环）。套用预设时同步风格芯片（由温度反推档位），使芯片/滑块/重载三者一致。
+配音设置存于 `gr.BrowserState`（浏览器 localStorage），密钥保存于当前安装的 `presets/.browser-state-key`，同一浏览器和服务地址在重启后仍能读取。设置保存实际的温度和 top_p。手动选择风格会派生两者的值，套用预设和恢复页面设置会直接应用已保存的参数。缺少这两个参数的旧设置仍可按已存风格派生默认值。
 
 「套用方案」下拉本身**不预选任何方案**：空白才诚实地表示「当前参数不来自某个方案」。用户手动改动方案内的任一参数时，`.input`（只在真人操作时触发，程序写回不触发）把选择清空——否则下拉会挂着旧方案名而参数已不是它，且再选同一方案不会触发套用。保存方案则反过来**立即选中**它：刚存的这份的参数就是当前参数，说真话。
 
@@ -79,17 +79,24 @@ Gradio `demo.queue()` 默认 `default_concurrency_limit=1`：**同 `concurrency_
 
 ### 4.8 启动与退出
 - **端口回退**：`demo.launch` 依次尝试 `7860 → 7861 → 8600 → 9000 → 5000`，首个能绑定的即启动；`launch` 在端口被占用/被系统保留（Hyper-V/WSL 动态保留段，`netstat` 看不到）时会同步抛 `OSError`，被逐个 `try/except` 兜住，全失败才抛友好 `RuntimeError`。避免"端口 7860 不可用就整个崩"。
-- **退出**：gradio 服务是常驻进程，**只关浏览器不会退出**（服务仍占内存与端口）。故给三条出口：界面右下「⏻ 退出」按钮（`do_exit` → 回传"已停止"文案 → `_schedule_exit` 延迟 0.6s `os._exit(0)`，留足响应回传时间）、关闭命令行窗口、窗口内 `Ctrl+C`；`Start EasyVoice.bat` 与 README 均明示"仅关浏览器不退出"。
+- **退出**：gradio 服务是常驻进程，**只关浏览器不会退出**（服务仍占内存与端口）。故给三条出口：界面右下「⏻ 退出」按钮（`do_exit` → 回传"已退出，可直接关闭此页面"文案 → `_schedule_exit` 延迟 0.6s `os._exit(0)`，留足响应回传时间）、关闭命令行窗口、窗口内 `Ctrl+C`；`Start EasyVoice.bat` 与 README 均明示"仅关浏览器不退出"。
 
-### 4.9 Gradio 6 的两条界面陷阱
+### 4.9 Gradio 6 的三条界面陷阱
 - **`gr.render` 里生成的控件不会按用途自动启用**：角色音色下拉、行内改名输入框都必须显式 `interactive=True`，否则渲染出来是灰的、点不动。事件照挂、单测照绿——只有真人去点才会发现这个功能在界面上根本用不了。
 - **`css=` 里的 `@media` 规则会被重新挂到 `.contain` 下**：`.main.fillable` 这类 `.contain` 的**祖先**选择器写在 `css=` 里永远匹配不到（不报错、规则也进了页面，就是不生效）。要动这层结构性内边距只能塞进 `head=` 的 `<style>`，它不经过作用域改写。窄屏那条内边距就是这么修的，别再挪回 `css=`。
+- **`gr.BrowserState` 的临时密钥陷阱**：Gradio 6 默认会对 localStorage 持久化内容做会话级临时加密。若未显式传 `secret`，服务每次重启都会重新生成密钥，导致浏览器上次存的设置无法解密被清空。必须在 `presets/.browser-state-key` 中固化持久密钥传入 `secret`。
+
+### 4.10 音色库原子写入与 Windows 文件锁
+`voice_library.py` 的 CRUD 使用线程级 `_LOCK` 保证进程内并发安全；文件写入使用 `_atomic_file` 上下文管理器（先写入同级临时文件并关闭文件句柄，再执行原子替换），并在 Windows 出现句柄占用（`PermissionError` winerror 5/32/33）时带递增延时重试。未引用的旧音频由 `_discard_file` 尽力清理（删除失败只记警告，不影响主流程），杜绝因并发或文件锁导致 `index.json` 或音频文件损坏。
 
 ## 5. 打包（整合包契约）
 
 `build.ps1` 用 conda-pack 把**已验证可用的 `easyvoice` conda 环境整体**打进 `runtime/`，而不是把 torch / qwen-tts 重新 pip 装进 python-embed——后者在 CUDA 轮子上极易碎。操作步骤见 [DEVELOPMENT.md](../DEVELOPMENT.md)，此处只记约束。
 
 - **两个变体**：完整大包（内置 0.6B 权重，~4.6GB，超 GitHub 单文件 2GB 上限需分卷）；CPU 精简包 `-Variant cpu`（不含 CUDA 与权重，~0.5GB，模型首启在工具内下载）。
+- **随包工具与校验**：固化打包 FFmpeg 9.0.2（包含 `ffmpeg.exe` 与 `ffprobe.exe`，严格校验 SHA-256 哈希），并附带对应 GPLv3 许可证与源代码获取声明。
+- **打包安全防御**：`build.ps1` 内置 `Assert-DistPath` 与 `Remove-DistTree`，严禁跨出 `dist/` 目录清理，并阻断 Windows 目录联接（ReparsePoint/Junction）遍历风险。脚本严格保持 ASCII 字符集，兼容 Windows PowerShell 5.1。
+- **运行时环境隔离**：`Start EasyVoice.bat` 启动时显式传递 `-E -s` 参数，并将 `Library\bin` 注入 PATH，确保嵌入式运行时不受宿主机外部环境变量或 user site-packages 污染。
 - **`-Version` 必须显式传**：它决定 `dist/EasyVoice-<Ver>[-cpu]/` 与同名 zip 的名字，默认值写死在 param 块里、不跟着 Release 走。漏传会产出与上一版同名的目录并覆盖它，故预检阶段会 `Write-Warning`。
 - **文档随包是硬约束，不是附赠**：包内 README 用的是仓库里的相对链接（`DEVELOPMENT.md`、`CHANGELOG.md`、`LICENSE`、`assets/brand/screenshot*.png`、`assets/packaging/THIRD-PARTY-NOTICES.txt`、`docs/`），少拷一个，解压后对应链接就指向不存在的文件。第 4 步的清单按原相对路径建子目录拷贝，缺文件会告警而非静默跳过。**往 README 里加相对链接时，同步加进那份清单。**
 
