@@ -2,7 +2,7 @@
 Tests for app.seed — seed_defaults() behaviour:
   1. Seeds 5 voices + 5 presets when stores are empty.
   2. Idempotent: calling twice does not duplicate.
-  3. Non-destructive: skips seeding when voices already exist.
+  3. Non-destructive: seeds voices only when the library is empty.
   4. Seeded presets carry param keys (temperature, top_p, speed).
 """
 import pytest

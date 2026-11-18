@@ -1,8 +1,9 @@
 """
 seed.py — seed demo voices and presets on first run.
 
-Idempotent: only seeds when the store is empty so a returning user's
-own voices/presets are never overwritten or duplicated.
+Idempotent: voices are seeded only when the voice library is empty and presets
+only when there are no presets; a returning user's own voices/presets are
+never overwritten or duplicated.
 """
 from pathlib import Path
 from app import voice_library, presets
