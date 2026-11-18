@@ -123,6 +123,18 @@ def test_parse_subtitles_srt_vtt_lrc():
     assert len(lrc) == 2 and lrc[0]["start"] == 1.0 and lrc[0]["end"] == 3.5 and lrc[1]["start"] == 3.5
 
 
+def test_lrc_expands_repeated_tags_and_scales_fractional_seconds():
+    cues = te.parse_subtitles(
+        "[ar:Artist]\n[00:03.250] [00:01.5]重复歌词\n[00:02:05]中间一句\n[00:06]结尾\n"
+    )
+    assert [(c["start"], c["end"], c["text"]) for c in cues] == [
+        (1.5, 2.05, "重复歌词"),
+        (2.05, 3.25, "中间一句"),
+        (3.25, 6.0, "重复歌词"),
+        (6.0, 10.0, "结尾"),
+    ]
+
+
 def test_parse_subtitles_drops_absurd_timestamps():
     # 异常/恶意时间戳(如 99:00:00)若保留，时间轴缓冲会被撑到几十 GB → MemoryError
     srt = ("1\n99:00:00,000 --> 99:00:05,000\n你好\n\n"
@@ -151,11 +163,17 @@ def test_cues_to_srt_format():
     assert "hi" in srt and "yo" in srt
 
 
+def _make_model_dir(path):
+    (path / "speech_tokenizer").mkdir(parents=True)
+    for name in ("config.json", "model.safetensors", "speech_tokenizer/model.safetensors"):
+        (path / name).touch()
+
+
 def test_ensure_model_skips_when_present(monkeypatch, tmp_path):
     import sys, types
     from app import tts_engine, config
     monkeypatch.setattr(config, "MODELS_DIR", tmp_path)
-    (tmp_path / "Qwen" / "Qwen3-TTS-12Hz-0___6B-Base").mkdir(parents=True)
+    _make_model_dir(tmp_path / "Qwen" / "Qwen3-TTS-12Hz-0___6B-Base")
     called = {"n": 0}
     fake = types.ModuleType("modelscope")
     fake.snapshot_download = lambda *a, **k: (called.__setitem__("n", called["n"] + 1), "X")[1]
@@ -169,22 +187,75 @@ def test_ensure_model_downloads_when_absent(monkeypatch, tmp_path):
     import sys, types
     from app import tts_engine, config
     monkeypatch.setattr(config, "MODELS_DIR", tmp_path)
+    monkeypatch.setenv("MODELSCOPE_CACHE", str(tmp_path))
+    monkeypatch.setattr(tts_engine, "_DOWNLOADED_DIRS", {})
     called = {"id": None}
     fake = types.ModuleType("modelscope")
     def _dl(model_id, *a, **k):
         called["id"] = model_id
-        return str(tmp_path / "downloaded")
+        actual = tmp_path / "downloaded"
+        actual.mkdir()
+        return str(actual)
     fake.snapshot_download = _dl
     monkeypatch.setitem(sys.modules, "modelscope", fake)
     out = tts_engine.ensure_model("Qwen/Qwen3-TTS-12Hz-0.6B-Base")
     assert called["id"] == "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
     assert out.endswith("downloaded")
+    loaded = []
+    monkeypatch.setattr(tts_engine, "_cuda_available", lambda: False)
+    monkeypatch.setattr(tts_engine, "_load", lambda source, device: loaded.append(source))
+    tts_engine.warmup()
+    assert loaded == [out]
+    assert tts_engine._prep_generation("0.6b", 0) == ("cpu", out, None)
+
+
+def test_windows_model_download_serializes_cache_writes(monkeypatch, tmp_path):
+    import os
+    import sys
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    model_id = te.config.MODEL_06B
+    downloaded = tmp_path / "models" / model_id.replace(".", "___")
+    download = Mock(return_value=str(downloaded))
+    monkeypatch.setenv("MODELSCOPE_CACHE", str(tmp_path))
+    monkeypatch.setattr(te.config, "MODELS_DIR", tmp_path)
+    monkeypatch.setattr(te, "_DOWNLOADED_DIRS", {})
+    monkeypatch.setattr(te, "os", SimpleNamespace(name="nt", environ=os.environ))
+    monkeypatch.setitem(sys.modules, "modelscope", SimpleNamespace(snapshot_download=download))
+
+    assert te.ensure_model(model_id) == str(downloaded)
+    download.assert_called_once_with(model_id, cache_dir=str(tmp_path / "models"), max_workers=1)
+
+
+def test_model_resolver_reuses_configured_cache_after_restart(monkeypatch, tmp_path):
+    from app import config
+
+    monkeypatch.setattr(config, "MODELS_DIR", tmp_path / "bundle" / "models")
+    monkeypatch.setattr(te, "_DOWNLOADED_DIRS", {})
+    cache = tmp_path / "custom cache"
+    monkeypatch.setenv("MODELSCOPE_CACHE", str(cache))
+    for model_id, root in ((config.MODEL_06B, cache), (config.MODEL_17B, cache / "models")):
+        path = root / model_id.replace(".", "___")
+        _make_model_dir(path)
+        assert te.resolve_model_dir(model_id) == str(path)
+    assert te.has_17b_downloaded()
+
+
+def test_partial_model_cache_is_not_treated_as_downloaded(monkeypatch, tmp_path):
+    monkeypatch.setattr(te.config, "MODELS_DIR", tmp_path)
+    monkeypatch.setenv("MODELSCOPE_CACHE", str(tmp_path))
+    partial = tmp_path / "models" / te.config.MODEL_17B.replace(".", "___")
+    partial.mkdir(parents=True)
+    (partial / "config.json").touch()
+    assert not te.has_17b_downloaded()
 
 
 def test_ensure_model_raises_clear_error_on_failure(monkeypatch, tmp_path):
     import sys, types, pytest
     from app import tts_engine, config
     monkeypatch.setattr(config, "MODELS_DIR", tmp_path)
+    monkeypatch.setenv("MODELSCOPE_CACHE", str(tmp_path))
     fake = types.ModuleType("modelscope")
     def _boom(*a, **k):
         raise OSError("network down")
@@ -283,7 +354,13 @@ def test_synthesize_routes_model_pref_to_17b(tmp_path, monkeypatch):
     monkeypatch.setattr(te, "_cuda_available", lambda: True)
     monkeypatch.setattr(te, "has_17b_downloaded", lambda: False)
     ensured = []
-    monkeypatch.setattr(te, "ensure_model", lambda mid: ensured.append(mid))
+    source = str(tmp_path / "downloaded-17b")
+
+    def ensure(mid):
+        ensured.append(mid)
+        return source
+
+    monkeypatch.setattr(te, "ensure_model", ensure)
     seen = {}
 
     def _mock_raw(text, lang, ref, device, model_id, **k):
@@ -293,14 +370,15 @@ def test_synthesize_routes_model_pref_to_17b(tmp_path, monkeypatch):
 
     monkeypatch.setattr(te, "_raw_synthesize", _mock_raw)
     te.synthesize("hi", "english", "ref.wav", model="1.7b")
-    assert seen["model_id"] == te.config.MODEL_17B and seen["device"] == "cuda"
+    assert seen["model_id"] == source and seen["device"] == "cuda"
     assert ensured == [te.config.MODEL_17B]
 
 
-def test_synthesize_one_routes_model_pref(monkeypatch):
+def test_synthesize_one_routes_model_pref(monkeypatch, tmp_path):
     monkeypatch.setattr(te, "_cuda_available", lambda: True)
     monkeypatch.setattr(te, "has_17b_downloaded", lambda: False)
-    monkeypatch.setattr(te, "ensure_model", lambda mid: None)
+    source = str(tmp_path / "downloaded-17b")
+    monkeypatch.setattr(te, "ensure_model", lambda mid: source)
     seen = {}
 
     class _Fake:
@@ -313,7 +391,7 @@ def test_synthesize_one_routes_model_pref(monkeypatch):
 
     monkeypatch.setattr(te, "_load", _mock_load)
     te.synthesize_one("hi", "english", "ref.wav", {"model": "1.7b"})
-    assert seen["model_id"] == te.config.MODEL_17B
+    assert seen["model_id"] == source
 
 
 def test_atempo_np_returns_original_on_write_failure(monkeypatch):

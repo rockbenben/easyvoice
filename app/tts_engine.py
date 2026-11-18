@@ -1,3 +1,6 @@
+from contextlib import contextmanager, nullcontext
+import os
+from pathlib import Path
 import subprocess
 import shutil
 import uuid
@@ -25,17 +28,32 @@ def _cuda_available() -> bool:
         return False
 
 
+_DOWNLOADED_DIRS = {}
+
+
 def resolve_model_dir(model_id: str) -> str:
-    """ModelScope 下载后目录名把 '.' 写成 '___'(Windows 符号链接失败),
-    且嵌套在 <org>/ 下(见 SPIKE §1)。返回本地实际目录;
-    不存在则原样返回 model_id(交给 from_pretrained 自行解析)。"""
-    parts = model_id.split("/")
-    name = parts[-1].replace(".", "___")
-    if len(parts) >= 2:
-        local = config.MODELS_DIR / parts[-2] / name
-    else:
-        local = config.MODELS_DIR / name
-    return str(local) if local.exists() else model_id
+    """查找随包权重、旧版和新版 ModelScope 缓存，保留 SDK 返回的实际路径。"""
+    if model_id in _DOWNLOADED_DIRS:
+        local = Path(_DOWNLOADED_DIRS[model_id])
+        if local.is_dir():
+            return str(local)
+
+    owner, _, name = model_id.rpartition("/")
+    cache = Path(os.environ.get("MODELSCOPE_CACHE") or config.MODELS_DIR).expanduser()
+    bundled = config.MODELS_DIR
+    for root in (bundled, cache / "models", cache, bundled / "models"):
+        for leaf in (name.replace(".", "___"), name):
+            local = root / owner / leaf
+            if _has_model_files(local):
+                return str(local)
+    return model_id
+
+
+def _has_model_files(path: Path) -> bool:
+    # ModelScope creates the destination before all weights have been downloaded.
+    return all((path / name).is_file() for name in (
+        "config.json", "model.safetensors", "speech_tokenizer/model.safetensors",
+    ))
 
 
 def ensure_model(model_id: str) -> str:
@@ -44,17 +62,21 @@ def ensure_model(model_id: str) -> str:
     local = resolve_model_dir(model_id)
     if local != model_id:                      # 已在本地
         return local
-    print("首次启动需下载模型（约 1.8GB，仅首次），请稍候…\n"
-          "First launch: downloading the model (~1.8 GB), please wait…", flush=True)
+    print("首次启动需下载模型（仅首次，请稍候…）\n"
+          "First launch: downloading the model (one-time), please wait…", flush=True)
     try:
         from modelscope import snapshot_download
-        path = snapshot_download(model_id)     # 自带 tqdm 进度
+        cache = Path(os.environ.get("MODELSCOPE_CACHE") or config.MODELS_DIR).expanduser()
+        # ModelScope download workers share an unsynchronized .msc index on Windows.
+        path = snapshot_download(model_id, cache_dir=str(cache / "models"),
+                                 max_workers=1 if os.name == "nt" else 8)
     except Exception as e:
         raise RuntimeError(
             "模型下载失败，请检查网络后重试。 "
             "Model download failed; check your network and retry. "
             f"(detail: {e})") from e
     print("模型已就绪。Model ready.", flush=True)
+    _DOWNLOADED_DIRS[model_id] = path
     return path
 
 
@@ -79,41 +101,62 @@ def resolve_model_pref(pref):
     return ("cuda", config.MODEL_17B if has_17b_downloaded() else config.MODEL_06B)
 
 
-def _prep_generation(model_pref, seed):
-    """两个合成入口(synthesize / synthesize_one)的公共前置：
-    解析模型档位 → 仅 1.7B 懒下载(0.6B 是常驻基座、启动已 ensure，
-    引擎路径不再触碰 ensure_model → 现有测试/CI 无下载风险) → 设种子。
-    seed>0 固定可复现；0 → 自然变化。返回 (device, model_id)。"""
-    device, model_id = resolve_model_pref(model_pref)
-    if model_id == config.MODEL_17B:
-        ensure_model(model_id)          # 幂等：已在本地直接返回，不下载
-    seed = int(seed or 0)
-    if seed > 0:
+class _RequestRng:
+    """固定种子请求的 Torch 随机状态，每个分段接着上一段采样。"""
+
+    def __init__(self, seed, device):
+        self._seed = seed
+        self._cuda = device == "cuda"
+        self._cpu_state = None
+        self._cuda_state = None
+
+    @contextmanager
+    def activate(self):
         import torch
-        torch.manual_seed(seed)
-    return device, model_id
+
+        # 调用方持有推理锁。仅交换 CPU 和模型使用的 cuda:0 的默认状态。
+        with torch.random.fork_rng(devices=[0] if self._cuda else []):
+            if self._cpu_state is None:
+                self._cpu_state = torch.Generator().manual_seed(self._seed).get_state()
+                if self._cuda:
+                    self._cuda_state = torch.Generator(device="cuda:0").manual_seed(self._seed).get_state()
+            torch.set_rng_state(self._cpu_state)
+            if self._cuda:
+                torch.cuda.set_rng_state(self._cuda_state, device=0)
+            yield
+            self._cpu_state = torch.get_rng_state()
+            if self._cuda:
+                self._cuda_state = torch.cuda.get_rng_state(device=0)
+
+
+def _prep_generation(model_pref, seed):
+    """两个合成入口（synthesize / synthesize_one）的公共前置：
+    解析模型档位 → 仅 1.7B 懒下载（0.6B 是常驻基座、启动已 ensure，引擎路径不触碰 ensure_model，
+    测试/CI 无下载风险）→ 若 seed>0 则构造隔离的 _RequestRng 保持跨分段/跨句采样连续性，0 则自然变化。
+    返回 (device, source, rng)。"""
+    device, model_id = resolve_model_pref(model_pref)
+    source = ensure_model(model_id) if model_id == config.MODEL_17B else resolve_model_dir(model_id)
+    seed = int(seed or 0)
+    return device, source, _RequestRng(seed, device) if seed > 0 else None
 
 
 _MODEL_CACHE = {}
-_LOAD_LOCK = threading.Lock()
-# 串行化 GPU 前向：Gradio queue 只保证「同 concurrency_id」串行，配音 Tab 与字幕 Tab
-# 的生成事件 id 不同，可被同时调度，对同一缓存模型并发前向 → 显存翻倍 OOM / CUDA 竞争。
-# 各调用点按段/按条获取释放，避免并发前向；单次顺序生成无争用、无开销。
+# 跨 Tab 串行化前向和冷加载，两者都可能消耗 Torch 默认随机状态。
 _INFER_LOCK = threading.Lock()
 
 
-def _load(model_id: str, device: str):
-    key = (model_id, device)
+def _load(source: str, device: str):
+    key = (source, device)
     if key in _MODEL_CACHE:
         return _MODEL_CACHE[key]
-    with _LOAD_LOCK:                       # 双检锁：预热线程与生成请求不会重复加载
+    with _INFER_LOCK:                      # 双检锁：预热线程与生成请求不会重复加载
         if key not in _MODEL_CACHE:
             import torch
             from qwen_tts import Qwen3TTSModel  # 见 SPIKE §3
             device_map = "cuda:0" if device == "cuda" else "cpu"
             dtype = torch.bfloat16 if device == "cuda" else torch.float32
             _MODEL_CACHE[key] = Qwen3TTSModel.from_pretrained(
-                resolve_model_dir(model_id), device_map=device_map, dtype=dtype)
+                source, device_map=device_map, dtype=dtype)
     return _MODEL_CACHE[key]
 
 
@@ -121,15 +164,15 @@ def warmup() -> None:
     """后台预加载模型，避免首次生成时的加载等待；出错静默(真正生成时会再报)。"""
     try:
         device, model_id = resolve_model_pref("auto")
-        _load(model_id, device)
+        _load(resolve_model_dir(model_id), device)
     except Exception:
         pass
 
 
-def _raw_synthesize(text, lang, ref_audio_path, device, model_id,
+def _raw_synthesize(text, lang, ref_audio_path, device, source,
                     temperature=0.9, top_p=0.9, top_k=50,
-                    repetition_penalty=1.0, max_new_tokens=2048, ref_text=None):
-    model = _load(model_id, device)
+                    repetition_penalty=1.0, max_new_tokens=2048, ref_text=None, rng=None):
+    model = _load(source, device)
     # 见 SPIKE §5a:返回 (List[np.ndarray], 24000)
     kwargs = dict(
         text=text, language=lang, ref_audio=ref_audio_path,
@@ -137,10 +180,10 @@ def _raw_synthesize(text, lang, ref_audio_path, device, model_id,
         temperature=temperature, top_p=top_p, top_k=top_k,
         repetition_penalty=repetition_penalty, max_new_tokens=max_new_tokens,
     )
-    # 始终用 x-vector 克隆模式。ICL(x_vector_only_mode=False + ref_text) 未经验证，
-    # 实测会把参考文字稿诵进输出(+ref_text 时长)，已移除该路径；ref_text 参数保留但忽略。
+    # 始终用 x-vector 克隆模式。ICL(x_vector_only_mode=False + ref_text) 实测会把参考文字稿
+    # 诵进输出(+ref_text 时长)，已移除该路径；ref_text 参数保留但忽略。
     kwargs.update(x_vector_only_mode=True)
-    with _INFER_LOCK:                      # 见 _INFER_LOCK：串行化跨 Tab 并发前向
+    with _INFER_LOCK, (rng.activate() if rng is not None else nullcontext()):
         wavs, sr = model.generate_voice_clone(**kwargs)
     return wavs, sr
 
@@ -245,7 +288,7 @@ def synthesize(text, lang, ref_audio_path,
                top_k=50, repetition_penalty=1.0, max_new_tokens=2048,
                ref_text=None, seed=0, model="auto", progress_cb=None) -> str:
     text = normalize_text(text, lang)
-    device, model_id = _prep_generation(model, seed)    # 选型/1.7B 懒下载/种子(见其 docstring)
+    device, source, rng = _prep_generation(model, seed)
     chunks = _split_text(text) if len(text) > _SPLIT_THRESHOLD else [text]
     if not chunks:                       # 全空白/纯标点超长 → 退回单段，避免 concatenate([]) 崩溃
         chunks = [text]
@@ -254,10 +297,10 @@ def synthesize(text, lang, ref_audio_path,
     if progress_cb:
         progress_cb(0, total_chars)                     # 进度：先报总字数
     for ch in chunks:                                   # 逐段用同一音色生成
-        wavs, sr = _raw_synthesize(ch, lang, ref_audio_path, device, model_id,
+        wavs, sr = _raw_synthesize(ch, lang, ref_audio_path, device, source,
                                    temperature=temperature, top_p=top_p, top_k=top_k,
                                    repetition_penalty=repetition_penalty,
-                                   max_new_tokens=max_new_tokens, ref_text=ref_text)
+                                   max_new_tokens=max_new_tokens, ref_text=ref_text, rng=rng)
         segs.append(_trim_silence(np.asarray(wavs[0], dtype=np.float32), sr))   # 去首尾异常静音
         done_chars += len(ch)
         if progress_cb:
@@ -299,6 +342,7 @@ def _parse_ts(s: str) -> float:
 
 
 _MAX_TIMELINE_SEC = 6 * 3600   # 时间轴上限(6h)：挡住异常/恶意时间戳(如 99:00:00)导致的超大内存分配
+_LRC_TIME = re.compile(r"\s*\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]")
 
 
 def parse_subtitles(content: str) -> list:
@@ -329,10 +373,15 @@ def parse_subtitles_ex(content: str):
     else:                                                  # LRC
         raw = []
         for line in content.split("\n"):
-            mm = re.match(r"\s*\[(\d{1,2}):(\d{2})(?:[.:](\d{1,2}))?\]\s*(.+)", line)
-            if mm:
-                t = int(mm.group(1)) * 60 + int(mm.group(2)) + int(mm.group(3) or 0) / 100.0
-                raw.append((t, mm.group(4).strip()))
+            pos, starts = 0, []
+            while match := _LRC_TIME.match(line, pos):
+                minutes, seconds, fraction = match.groups()
+                millis = int((fraction or "0").ljust(3, "0"))
+                starts.append(int(minutes) * 60 + int(seconds) + millis / 1000)
+                pos = match.end()
+            text = line[pos:].strip()
+            if text:
+                raw.extend((start, text) for start in starts)
         raw.sort(key=lambda x: x[0])
         for i, (t, txt) in enumerate(raw):
             end = raw[i + 1][0] if i + 1 < len(raw) else t + 4.0
@@ -407,15 +456,14 @@ def synthesize_one(text, lang, ref_audio_path, params=None):
     「生成全部」与「单条重录」共用此函数，保证行为一致。返回 (audio, sr)。"""
     params = params or {}
     text = normalize_text(text, lang)
-    device, model_id = _prep_generation(params.get("model", "auto"),
-                                        params.get("seed", 0))
+    device, source, rng = _prep_generation(params.get("model", "auto"), params.get("seed", 0))
     cap = _cue_token_cap(text, int(params.get("max_new_tokens", 2048)))
     wavs, sr = _raw_synthesize(              # 复用统一推理包装(内含 _INFER_LOCK 与克隆模式 kwargs)
-        text, lang, ref_audio_path, device, model_id,
+        text, lang, ref_audio_path, device, source,
         temperature=params.get("temperature", 0.9), top_p=params.get("top_p", 0.9),
         top_k=params.get("top_k", 50),
         repetition_penalty=params.get("repetition_penalty", 1.0),
-        max_new_tokens=cap)
+        max_new_tokens=cap, rng=rng)
     return _trim_silence(np.asarray(wavs[0], dtype=np.float32), sr), sr
 
 
