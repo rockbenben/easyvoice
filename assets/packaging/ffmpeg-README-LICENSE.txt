@@ -1,7 +1,7 @@
 FFmpeg —— 第三方组件许可与源代码声明
 ======================================
 
-本目录内的 ffmpeg.exe 是 FFmpeg 项目的预编译可执行文件，取自 gyan.dev 发布的
+本目录内的 ffmpeg.exe 和 ffprobe.exe 是 FFmpeg 项目的预编译可执行文件，取自 gyan.dev 发布的
 “ffmpeg-release-essentials” 构建，采用 GNU General Public License v3 (GPLv3) 授权。
 完整许可文本见同目录下的 COPYING.GPLv3.txt。
 
@@ -16,12 +16,11 @@ FFmpeg —— 第三方组件许可与源代码声明
 
 源代码提供声明（满足 GPLv3 第 6 条）
 ------------------------------------
-与本 ffmpeg.exe 相对应的完整源代码，可从上述 FFmpeg 官方仓库与 gyan.dev 构建渠道
+与这两个可执行文件相对应的完整源代码，可从上述 FFmpeg 官方仓库与 gyan.dev 构建渠道
 免费获取。如需协助获取对应版本源代码，可通过易声(EasyVoice) 项目仓库 issue 联系维护者。
 
 易声(EasyVoice) 与 FFmpeg 的关系
 --------------------------------
-易声仅在“变速（语速 ≠ 1.0）”功能中，以【独立子进程】方式调用 ffmpeg.exe
-（Python subprocess 调用，并非与之链接）。这在 GPL 意义上属于“单纯聚合”
+易声在音频转码、变速和视频导出时，以独立子进程调用 FFmpeg 工具。
+这在 GPL 意义上属于“单纯聚合”
 (mere aggregation)，因此 FFmpeg 的 GPLv3 不会传染到易声自身的代码；易声未修改 FFmpeg。
-若缺少本 ffmpeg.exe，易声会自动优雅降级（变速功能不生效，其余功能照常）。

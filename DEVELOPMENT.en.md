@@ -26,9 +26,9 @@ End users do not need this page — download a bundle and double-click, see the 
 
    (No GPU? Skip this — the CPU build installs in step 1.)
 
-3. **(Optional) ffmpeg for speed control** — put `ffmpeg.exe` on PATH or in the project `ffmpeg/` folder. If missing, speed ≠ 1.0 gracefully degrades.
+3. **(Optional) FFmpeg for speed control & video muxing** — put `ffmpeg.exe` (and `ffprobe.exe`) on PATH or in the project `ffmpeg/` folder. If missing, speed ≠ 1.0 and video muxing gracefully degrade (falling back to 1.0x speed or exporting audio+subtitles only).
 
-4. **Model** — downloaded automatically from ModelScope into `models/` on first run. Set `MODELSCOPE_CACHE` to customize the cache path.
+4. **Model** — downloaded automatically from ModelScope into `models/` on first run (`MODELSCOPE_CACHE` defaults to that folder; the SDK cache lands in a `models/` subdirectory under it, i.e. `models/models/` by default). Set `MODELSCOPE_CACHE` to change the cache root.
 
 ### Run
 
@@ -64,7 +64,7 @@ easyvoice/
 │   └── ui.py             # Gradio UI (four tabs)
 ├── AGENTS.md             # Working conventions — read before touching code
 ├── app_main.py           # Entry point
-├── build.ps1             # Bundle builder (conda-pack runtime + model + ffmpeg)
+├── build.ps1             # Bundle builder (conda-pack runtime + model + FFmpeg tools)
 ├── Start EasyVoice.bat   # Windows launcher
 ├── requirements.txt      # Python dependencies
 ├── pyproject.toml        # pytest config
@@ -73,13 +73,15 @@ easyvoice/
 └── tests/                # Automated tests
 ```
 
-> `models/`, `voices/`, `presets/`, `outputs/`, `runtime/`, `ffmpeg/`, `dist/` are runtime / build artifacts and are gitignored.
+> `models/`, `voices/`, `presets/`, `outputs/`, `ffmpeg/`, `dist/` are runtime / build artifacts and are gitignored.
 
 ---
 
 ## Building the bundle (optional)
 
 `build.ps1` packs the validated conda env into an unzip-and-double-click bundle:
+
+Before packing, run `python -s -m pip install --no-user -r requirements.txt` in the selected environment. The build checks imports in the source and the extracted runtime with `-E -s` (external Python environment variables and the user site are ignored).
 
 ```powershell
 pwsh -File build.ps1 -Version v1.1.2                  # Full bundle: GPU/CPU auto, model bundled (~4.6 GB)
@@ -88,6 +90,6 @@ pwsh -File build.ps1 -Version v1.1.2 -Variant cpu     # CPU lite: no CUDA, no mo
 
 > ⚠️ **Always pass `-Version` when cutting a release.** The default is hardcoded in the `param` block of `build.ps1` and does not track the release. Omitting it produces a directory and zip named after whatever that default happens to be, overwriting an existing build in `dist/` and shipping mislabeled assets.
 >
-> The remaining parameters (`-EnvName` / `-CondaRoot` / `-ModelId`) are documented in the header comment of `build.ps1` and rarely need changing.
+> The remaining parameters (`-EnvName` / `-CondaRoot` / `-ModelId` / `-Variant`) are documented in the header comment of `build.ps1` and rarely need changing.
 
-It produces `dist/EasyVoice-<Version>[-cpu]/` and a same-named `.zip`. The full bundle exceeds GitHub's 2 GB per-asset limit — split it into volumes (with `merge-and-extract.bat`) or host externally; the CPU lite bundle is a single file.
+It produces `dist/EasyVoice-<Version>[-cpu]/` and a same-named `.zip`. The full bundle exceeds GitHub's 2 GB per-asset limit — split it into volumes (with `merge-and-extract.bat`) or host externally; the CPU lite bundle is a single file. The split volumes and `merge-and-extract.bat` ship as release assets, not in this repository.

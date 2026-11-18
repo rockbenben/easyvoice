@@ -26,9 +26,9 @@
 
    （若无 GPU，跳过此步，CPU 版会在第一步自动安装）
 
-3. **（可选）变速功能需要 ffmpeg**：将 `ffmpeg.exe` 放到 PATH 或项目 `ffmpeg/` 目录；缺失时语速≠1.0 会自动优雅降级。
+3. **（可选）变速与视频合成需要 FFmpeg**：将 `ffmpeg.exe`（及 `ffprobe.exe`）放到 PATH 或项目 `ffmpeg/` 目录；缺失时语速≠1.0 与视频合成会自动优雅降级（降级为原速音频或仅输出音频+字幕）。
 
-4. **模型**：首次运行自动从 ModelScope 下载到 `models/`。自定义缓存路径可设环境变量 `MODELSCOPE_CACHE`。
+4. **模型**：首次运行自动从 ModelScope 下载到 `models/`（`MODELSCOPE_CACHE` 默认指向该目录，SDK 缓存落在其下的 `models/`，即默认为 `models/models/`）。可设 `MODELSCOPE_CACHE` 自定义缓存根路径。
 
 ### 运行应用
 
@@ -64,7 +64,7 @@ easyvoice/
 │   └── ui.py             # Gradio UI（四标签页）
 ├── AGENTS.md             # 开发约定正本（改代码前先读）
 ├── app_main.py           # 应用入口
-├── build.ps1             # 整合包打包脚本（conda-pack 运行时 + 模型 + ffmpeg）
+├── build.ps1             # 整合包打包脚本（conda-pack 运行时 + 模型 + FFmpeg 工具）
 ├── Start EasyVoice.bat   # Windows 用户启动脚本
 ├── requirements.txt      # Python 依赖
 ├── pyproject.toml        # pytest 配置
@@ -73,13 +73,15 @@ easyvoice/
 └── tests/                # 自动化测试
 ```
 
-> `models/`、`voices/`、`presets/`、`outputs/`、`runtime/`、`ffmpeg/`、`dist/` 为运行时 / 打包产物，已在 `.gitignore` 中忽略。
+> `models/`、`voices/`、`presets/`、`outputs/`、`ffmpeg/`、`dist/` 为运行时 / 打包产物，已在 `.gitignore` 中忽略。
 
 ---
 
 ## 整合包打包（可选）
 
 用 `build.ps1` 把已验证的 conda 环境打成「解压双击即用」的整合包：
+
+打包前，在对应环境中用 `python -s -m pip install --no-user -r requirements.txt` 补齐依赖。构建会用 `-E -s` 检查源环境和解包后的运行时（忽略外部 Python 环境变量与用户级包目录）。
 
 ```powershell
 pwsh -File build.ps1 -Version v1.1.2                  # 完整大包：GPU/CPU 自适应、内置模型（约 4.6GB）
@@ -88,6 +90,6 @@ pwsh -File build.ps1 -Version v1.1.2 -Variant cpu     # CPU 精简包：无 CUDA
 
 > ⚠️ **`-Version` 每次发版都要显式传**：默认值写死在 `build.ps1` 的 param 块里，不跟着 Release 走。漏传会产出与上一版同名的目录和 zip，直接覆盖 `dist/` 里的上一版产物，并发出版本号标错的分发包。
 >
-> 其余参数（`-EnvName` / `-CondaRoot` / `-ModelId`）见 `build.ps1` 头部注释，通常不用改。
+> 其余参数（`-EnvName` / `-CondaRoot` / `-ModelId` / `-Variant`）见 `build.ps1` 头部注释，通常不用改。
 
-产物为 `dist/EasyVoice-<Version>[-cpu]/` 目录与同名 `.zip`。完整大包超过 GitHub Release 单文件 2 GB 上限，需分卷（配 `merge-and-extract.bat`）或走外部托管；CPU 精简包单文件即可上传。
+产物为 `dist/EasyVoice-<Version>[-cpu]/` 目录与同名 `.zip`。完整大包超过 GitHub Release 单文件 2 GB 上限，需分卷（配 `merge-and-extract.bat`）或走外部托管；CPU 精简包单文件即可上传。分卷与 `merge-and-extract.bat` 作为 Release 资产发布，不在源码库内。

@@ -5,7 +5,7 @@ qwen-tts
 soundfile
 
 # UI
-gradio
+gradio>=6,<7
 
 # Chinese text processing
 opencc-python-reimplemented
@@ -16,5 +16,6 @@ pytest
 # ModelScope for China-region model download
 modelscope
 
-# PyTorch — install the CUDA build manually (not listed here to avoid pulling CPU-only wheel):
+# PyTorch is not pinned here: qwen-tts -> torchaudio pulls the CPU wheel transitively.
+# For an NVIDIA GPU, install the CUDA build manually (before or after this file):
 # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121

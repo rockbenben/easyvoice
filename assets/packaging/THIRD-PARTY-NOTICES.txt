@@ -4,6 +4,8 @@
 为实现“解压即用”，本整合包内置了 Python 运行时、Qwen3-TTS 模型权重与 FFmpeg。
 各第三方组件的许可与归属如下。易声(EasyVoice) 自身代码的许可见项目仓库根目录的
 LICENSE 文件。
+CPU 精简包（-cpu 版）不内置模型权重与 CUDA 运行库：模型在首次启动时由工具
+从 ModelScope 下载，PyTorch 为 CPU 构建。
 
 1) Qwen3-TTS 模型权重  ——  models\Qwen\Qwen3-TTS-12Hz-0___6B-Base\
    许可：Apache License 2.0（允许再分发与商用）。
@@ -12,10 +14,10 @@ LICENSE 文件。
    版权归 Qwen 团队 / 阿里巴巴所有；项目主页 https://github.com/QwenLM/Qwen3-TTS
    易声在其基础上仅做应用层封装，未修改模型权重。
 
-2) FFmpeg  ——  ffmpeg\ffmpeg.exe
+2) FFmpeg 工具  ——  ffmpeg\ffmpeg.exe 与 ffmpeg\ffprobe.exe
    许可：GNU General Public License v3 (GPLv3)，gyan.dev 的 “release-essentials” 构建。
    完整许可文本与源代码获取声明见 ffmpeg\COPYING.GPLv3.txt 与 ffmpeg\README-LICENSE.txt。
-   易声以独立子进程方式调用，属“单纯聚合”，GPLv3 不传染到易声自身代码。
+   易声在音频转码、变速与视频导出时以独立子进程方式调用，属“单纯聚合”，GPLv3 不传染到易声自身代码。
 
 3) 内置 Python 运行时及其依赖  ——  runtime\
    通过 conda-pack 打包，内含 Python 3.12、PyTorch、Gradio、qwen-tts 等及其全部依赖。
