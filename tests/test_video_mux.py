@@ -50,3 +50,40 @@ def test_mux_returns_none_when_outdir_unwritable(monkeypatch):
 
     monkeypatch.setattr(vm.config, "OUTPUTS_DIR", _BadDir())
     assert vm.mux("v.mp4", "a.wav") is None     # C1: degrade to None, not crash
+import shutil
+import subprocess
+
+import pytest
+
+
+
+
+@pytest.mark.parametrize(("original_sec", "dub_sec"), [(2, 1), (0, 1), (2, 10), (10, 1)])
+def test_mux_keep_preserves_video_duration(tmp_path, monkeypatch, original_sec, dub_sec):
+    from app import video_mux as vm
+
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    if not ffmpeg or not ffprobe:
+        pytest.skip("requires ffmpeg and ffprobe")
+    monkeypatch.setattr(vm.tts_engine, "_ffmpeg_exe", lambda: ffmpeg)
+    monkeypatch.setattr(vm.config, "OUTPUTS_DIR", tmp_path)
+    video = tmp_path / "video.mp4"
+    dub = tmp_path / "dub.wav"
+    inputs = ["-f", "lavfi", "-i", "color=size=128x96:rate=10:duration=8"]
+    if original_sec:
+        inputs += ["-f", "lavfi", "-i", f"sine=frequency=300:duration={original_sec}"]
+    subprocess.run([ffmpeg, "-v", "error", *inputs, "-c:v", "mpeg4", "-bf", "0", str(video)],
+                   check=True, timeout=30)
+    subprocess.run([ffmpeg, "-v", "error", "-f", "lavfi", "-i", f"sine=duration={dub_sec}", str(dub)],
+                   check=True, timeout=30)
+
+    out = vm.mux(str(video), str(dub), keep_original=True)
+    assert out is not None
+    streams = subprocess.check_output([
+        ffprobe, "-v", "error", "-show_entries", "stream=codec_type,duration",
+        "-of", "csv=p=0", out,
+    ], text=True, timeout=30).splitlines()
+    durations = {kind: float(seconds) for kind, seconds in (s.split(",") for s in streams)}
+    assert durations["video"] == pytest.approx(8)
+    assert durations["audio"] == pytest.approx(8, abs=0.1)

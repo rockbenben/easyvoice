@@ -11,8 +11,8 @@ def build_mux_cmd(video_path, audio_path, out_path,
     if keep_original:
         return [ff, "-y", "-i", video_path, "-i", audio_path,
                 "-filter_complex",
-                f"[0:a]volume={original_volume}[a0];"
-                f"[a0][1:a]amix=inputs=2:duration=longest[a]",
+                f"[0:a:0]volume={original_volume}[a0];"
+                "[a0][1:a:0]amix=inputs=2:duration=longest,apad[a]",
                 "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-shortest", out_path]
     # 配音常短于视频(最后一句字幕多在片尾前结束)。apad 用静音把配音补到无限长，
     # 再由 -shortest 收到视频长度 → 输出恒等于视频时长：短则补静音到片尾(不截画面)，
@@ -29,6 +29,14 @@ def mux(video_path, audio_path, keep_original=False, original_volume=0.15):
         out_path = str(config.OUTPUTS_DIR / f"dub_{uuid.uuid4().hex[:8]}.mp4")
         cmd = build_mux_cmd(video_path, audio_path, out_path, keep_original, original_volume)
         r = subprocess.run(cmd, capture_output=True, timeout=1800)
+        # 若原视频不含音轨，ffmpeg 会报滤镜绑定错误（matches no streams）。
+        # 此处直接捕获并自动降级为替换原声模式，无需在每次导出前额外拉起 ffprobe 进程探测。
+        if (keep_original and r.returncode != 0 and any(
+            b"[0:a:0]volume=" in line and b"matches no streams" in line
+            for line in r.stderr.splitlines()
+        )):
+            cmd = build_mux_cmd(video_path, audio_path, out_path)
+            r = subprocess.run(cmd, capture_output=True, timeout=1800)
         if r.returncode == 0:
             return out_path
     except Exception:
