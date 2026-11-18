@@ -1,3 +1,6 @@
+import pytest
+
+
 def test_build_ui_returns_blocks(monkeypatch, tmp_path):
     from app import config
     monkeypatch.setattr(config, "VOICES_DIR", tmp_path / "v")
@@ -17,6 +20,44 @@ def test_build_ui_disables_gradio_telemetry(monkeypatch, tmp_path):
     demo = ui.build_ui("zh-Hans")
     # 本地隐私工具：不得向 api.gradio.app 发遥测，也不做联网版本检查
     assert demo.analytics_enabled is False
+
+
+def test_browser_settings_keep_key_across_ui_rebuilds(monkeypatch, tmp_path):
+    import gradio as gr
+    from app import config, ui
+
+    monkeypatch.setattr(config, "PRESETS_DIR", tmp_path)
+    first, second = (ui.build_ui("en") for _ in range(2))
+    one, two = (next(c for c in demo.blocks.values() if isinstance(c, gr.BrowserState))
+                for demo in (first, second))
+    assert one.secret == two.secret == (tmp_path / ".browser-state-key").read_text(encoding="ascii")
+    assert ui.presets.list_presets() == []
+
+
+def test_preset_controls_and_restore_keep_actual_sampling_and_speed(monkeypatch, tmp_path):
+    from app import config, presets, ui
+
+    monkeypatch.setattr(config, "PRESETS_DIR", tmp_path)
+    presets.save_preset("Audiobook", {"lang": "english", "voice_id": "v0",
+                                    "temperature": 0.8, "top_p": 0.75, "speed": 0.95})
+    demo = ui.build_ui("en")
+    events = {getattr(f.fn, "__name__", ""): f for f in demo.fns.values()}
+    apply = events["do_apply_preset"]
+    speed, temperature, top_p, style = apply.outputs[2:]
+    assert events["do_apply_style"].targets == [(style._id, "input")]
+    values = apply.fn("Audiobook")
+    assert values[2:] == (0.95, 0.8, 0.75, "natural")
+    assert speed.postprocess(values[2]) == 0.95 and speed.step == 0.05
+
+    remember = events["_save_settings"]
+    restore = events["_restore_settings"]
+    actual = {speed: 0.95, temperature: 0.8, top_p: 0.75, style: "natural"}
+    saved = remember.fn(*(actual.get(component) for component in remember.inputs))
+    restored = dict(zip(restore.outputs, restore.fn(saved)))
+    assert {component: restored[component]["value"] for component in actual} == actual
+    legacy = dict(zip(restore.outputs, restore.fn({"style": "stable", "seed": 321})))
+    assert legacy[temperature]["value"] == 0.5 and legacy[top_p]["value"] == 0.85
+
 
 def test_generate_handler_uses_engine(monkeypatch, tmp_path):
     from app import ui, tts_engine, voice_library, config
@@ -52,7 +93,6 @@ def test_do_generate_forwards_seed(monkeypatch, tmp_path):
         return str(tmp_path / "x.wav")
     monkeypatch.setattr(tts_engine, "synthesize", _mock_synth)
     monkeypatch.setattr(voice_library, "get_audio_path", lambda vid: str(tmp_path / "ref.wav"))
-    monkeypatch.setattr(voice_library, "get_ref_text", lambda vid: "")
     ui.do_generate(text="测试", lang="chinese", voice_id="ab12", seed=123)
     assert captured["seed"] == 123
 
@@ -76,7 +116,7 @@ def test_do_apply_style_returns_correct_params():
 
 
 def test_do_exit_schedules_and_reports(monkeypatch):
-    """退出按钮：触发进程退出(mock 掉，别真杀 pytest) + 回传本地化"已停止"文案。"""
+    """退出按钮：触发进程退出(mock 掉，别真杀 pytest) + 回传本地化"已退出"文案。"""
     from app import ui
     called = {}
     monkeypatch.setattr(ui, "_schedule_exit", lambda: called.setdefault("sched", True))
@@ -344,7 +384,6 @@ def test_run_generate_resets_and_returns_audio_on_success(monkeypatch, tmp_path)
     monkeypatch.setattr(config, "VOICES_DIR", tmp_path)
     monkeypatch.setattr(tts_engine, "synthesize", lambda *a, **k: str(tmp_path / "x.wav"))
     monkeypatch.setattr(voice_library, "get_audio_path", lambda vid: str(tmp_path / "ref.wav"))
-    monkeypatch.setattr(voice_library, "get_ref_text", lambda vid: "")
     frames = list(ui._run_generate(text="你好", lang="chinese", voice_id="ab12"))
     assert _btn_interactive(frames[0][0]) is False        # 首帧禁用按钮
     assert _btn_interactive(frames[-1][0]) is True         # 末帧复位按钮
@@ -380,8 +419,9 @@ def test_subtitle_dub_helpers_build_table(monkeypatch, tmp_path):
         assert all(leak != r[3] for r in rows)
 
 
-def test_build_ui_with_subtitle_tab_constructs():
+def test_build_ui_with_subtitle_tab_constructs(monkeypatch, tmp_path):
     from app import ui
+    monkeypatch.setattr(ui.config, "PRESETS_DIR", tmp_path)
     demo = ui.build_ui("zh-Hans")          # 不抛错即说明新标签接线无误
     assert demo is not None
 
@@ -394,7 +434,7 @@ def test_edit_text_without_selection_errors(monkeypatch, tmp_path):
     with pytest.raises(gr.Error):
         ui.do_sub_edit_text(proj, None, "x", None)        # 未选行 → 友好报错
     # project 为 None 时静默返回，不报错
-    out, _, _ = ui.do_sub_edit_text(None, None, "x", None)
+    out, *_ = ui.do_sub_edit_text(None, None, "x", None)
     assert out is None
 
 
@@ -404,13 +444,46 @@ def test_role_change_updates_voice_and_table(monkeypatch, tmp_path):
     srt = ("1\n00:00:01,000 --> 00:00:02,000\n张三：你好\n\n"
            "2\n00:00:03,000 --> 00:00:04,000\n李四：还行\n")
     proj = dp.build_project(srt, "chinese", "v0")
-    out_proj, table_update, gen_update = ui._role_change(proj, "张三", "v9")
+    out_proj, table_update, gen_update, _ = ui._role_change(proj, "张三", "v9")
     assert out_proj["speakers"]["张三"] == "v9"
     # 张三 the cue (row 0) is now dirty in the refreshed table — 状态列为本地化用户词
     tb = i18n.load("zh-Hans")
     assert table_update["value"][0][3] == i18n.t(tb, "st.dirty")
     # 生成按钮带待生成计数（此处 2 条：1 dirty + 1 pending）
     assert "2" in gen_update["value"]
+
+
+def test_rendered_role_events_bind_each_speaker(monkeypatch, tmp_path):
+    from gradio.context import LocalContext
+    from app import dubbing_project as dp, ui
+
+    project = dp.build_project(
+        "1\n00:00:01,000 --> 00:00:02,000\nAlice: Hi\n\n"
+        "2\n00:00:03,000 --> 00:00:04,000\nBob: Bye\n",
+        "english", "v0",
+    )
+    monkeypatch.setattr(ui, "_voice_choices", lambda: [("Voice 1", "v0"), ("Voice 2", "v2")])
+    monkeypatch.setattr(ui.voice_library, "list_voices", lambda: [{"id": "v0", "name": "Voice 1"}])
+    monkeypatch.setattr(ui.config, "PRESETS_DIR", tmp_path)
+    demo = ui.build_ui("en")
+    render = next(r for r in demo.renderables if r.fn.__name__ == "_render_roles")
+    with demo:
+        token = LocalContext.blocks_config.set(demo.default_config)
+        try:
+            render.apply(project, "en")
+        finally:
+            LocalContext.blocks_config.reset(token)
+    events = [f for f in demo.fns.values() if f.rendered_in is render]
+    assert len(events) == 2
+    for event, speaker in zip(events, ("Alice", "Bob")):
+        assert event.concurrency_id == ui._SUB_CC
+        values = [project if component is event.outputs[0] else "v2"
+                  for component in event.inputs]
+        updated, *_ = event.fn(*values)
+        assert updated["speakers"][speaker] == "v2"
+        other = "Bob" if speaker == "Alice" else "Alice"
+        assert updated["speakers"][other] == "v0"
+        dp.set_speaker_voice(project, speaker, "v0")
 
 
 def test_model_choices_two_tiers():
@@ -462,6 +535,7 @@ def test_run_sub_export_flags_non_ok_cues(tmp_path, monkeypatch):
            "2\n00:00:03,000 --> 00:00:04,000\n世界\n")
     p = dp.build_project(srt, "chinese", "v0")
     p["cues"][0]["status"] = "ok"
+    p["cues"][0]["audio_path"] = "cue_0.wav"
     p["cues"][1]["status"] = "dirty"       # 非 ok → 应触发"已跳过"提示
     list(ui._run_sub_export(p, None, "replace"))   # 无视频，消费生成器
     assert len(infos) == 1                  # gr.Info 提示了跳过条数
@@ -482,6 +556,31 @@ def test_do_sub_parse_threads_detect_speakers(monkeypatch, tmp_path):
     assert out_on[0]["cues"][0]["text"] == "Meeting at 12:30 PM"
 
 
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig", "utf-16", "utf-16-be"])
+def test_subtitle_preview_and_parse_share_strict_decoding(tmp_path, encoding):
+    from codecs import BOM_UTF16_BE
+    from app import ui
+
+    path = tmp_path / "caption.srt"
+    text = "1\n00:00:01,000 --> 00:00:02,000\n中文配音\n".encode(encoding)
+    path.write_bytes(BOM_UTF16_BE + text if encoding == "utf-16-be" else text)
+    assert "检测到 **1** 条字幕" in ui.do_subtitle_preview(str(path))["value"]
+    project = ui.do_sub_parse(str(path), "chinese", "v0")[0]
+    assert project["cues"][0]["text"] == "中文配音"
+
+
+@pytest.mark.parametrize("encoding", ["gbk", "utf-16-le"])
+def test_subtitle_preview_and_parse_report_unsupported_encoding(tmp_path, encoding):
+    import gradio as gr
+    from app import ui
+
+    path = tmp_path / "caption.srt"
+    path.write_bytes("1\n00:00:01,000 --> 00:00:02,000\n中文配音\n".encode(encoding))
+    assert "另存为 UTF-8" in ui.do_subtitle_preview(str(path))["value"]
+    with pytest.raises(gr.Error, match="另存为 UTF-8"):
+        ui.do_sub_parse(str(path), "chinese", "v0")
+
+
 def test_do_sub_parse_resets_selection(monkeypatch, tmp_path):
     from app import ui, dubbing_project as dp
     monkeypatch.setattr(dp.config, "OUTPUTS_DIR", tmp_path)
@@ -490,9 +589,27 @@ def test_do_sub_parse_resets_selection(monkeypatch, tmp_path):
     out = ui.do_sub_parse(str(f), "english", "v0")
     # 输出顺序: project, table, _sub_sel, edit_text, edit_speaker, edit_audio
     assert out[2] is None and out[5] is None        # 选中与试听被重置
+    assert out[3]["interactive"] is False and out[4]["interactive"] is False
+    selected = ui.do_sub_select(out[0], None)
+    assert selected[1]["interactive"] is True and selected[2]["interactive"] is True
     # 解析后摘要必须改成"已解析"，不能还提示用户再点一次解析
     preview = out[-1].get("value") if isinstance(out[-1], dict) else getattr(out[-1], "value", "")
     assert "已解析" in preview
+
+
+def test_new_subtitle_project_clears_all_export_outputs(monkeypatch, tmp_path):
+    from app import ui
+
+    subtitle = tmp_path / "new.srt"
+    subtitle.write_text("1\n00:00:01,000 --> 00:00:02,000\nNew line\n", encoding="utf-8")
+    monkeypatch.setattr(ui.config, "PRESETS_DIR", tmp_path)
+    demo = ui.build_ui("en")
+    events = {getattr(f.fn, "__name__", ""): f for f in demo.fns.values()}
+    parse = events["do_sub_parse"]
+    export = events["_run_sub_export"]
+    updates = parse.fn(str(subtitle), "english", "v0")
+    assert len(updates) == len(parse.outputs)
+    assert all(updates[parse.outputs.index(component)] is None for component in export.outputs[1:])
 
 
 def test_run_sub_export_nothing_generated_raises_grerror(monkeypatch, tmp_path):
@@ -513,12 +630,13 @@ def test_do_save_preset_collision_raises_grerror(monkeypatch, tmp_path):
         ui.do_save_preset("test#1", "chinese", "v0", 0.9, 0.9, 1.0)  # 同 _safe → test_1.json 冲突
 
 
-def test_subtitle_handlers_serialized_on_shared_concurrency_id():
+def test_subtitle_handlers_serialized_on_shared_concurrency_id(monkeypatch, tmp_path):
     # 字幕配音里改同一 project 的 handler 必须共享 concurrency_id，
     # 否则 Gradio queue 会并行不同事件、并发改同一 gr.State dict → 竞态污染导出。
     # 结构化断言真正的不变量：凡输出(改写) _sub_proj 的静态事件都必须串行——
     # 新增改 project 的 handler 忘了挂 id 会在此失败，而非靠数数。
     from app import ui
+    monkeypatch.setattr(ui.config, "PRESETS_DIR", tmp_path)
     demo = ui.build_ui("zh-Hans")
     fns = list(demo.fns.values())
     parse = next(f for f in fns if getattr(f.fn, "__name__", "") == "do_sub_parse")
@@ -650,6 +768,47 @@ def test_do_sub_reroll_proceeds_when_panel_matches_saved(monkeypatch, tmp_path):
     assert rolled == [0] and warnings == []
 
 
+def test_single_reroll_controls_preview_and_export(tmp_path, monkeypatch, caplog):
+    from pathlib import Path
+    import numpy as np
+    from app import ui, dubbing_project as dp
+
+    warnings = []
+    monkeypatch.setattr(ui.gr, "Warning", warnings.append)
+    monkeypatch.setattr(dp.config, "OUTPUTS_DIR", tmp_path)
+    monkeypatch.setattr(dp.voice_library, "get_audio_path", lambda vid: "ref.wav")
+    monkeypatch.setattr(dp.tts_engine, "synthesize_one",
+                        lambda *args: (np.full(2400, 0.3, np.float32), 24000))
+    p = dp.build_project("1\n00:00:01,000 --> 00:00:02,000\n你好\n", "chinese", "v0")
+    _, table, audio, _, visibility = ui.do_sub_reroll(p, 0, "0.6b", "你好", "默认")
+    assert table["value"][0][3] == ui.i18n.load("zh-Hans")["st.ok"]
+    assert Path(audio).is_file() and visibility["visible"] is True
+    assert list(ui._run_sub_export(p, None, "replace"))[-1][2].endswith(".srt")
+
+    def fail(*args):
+        raise RuntimeError("CUDA out of memory (test)")
+
+    monkeypatch.setattr(dp.tts_engine, "synthesize_one", fail)
+    _, table, preview, _, visibility = ui.do_sub_reroll(p, 0, "0.6b", "你好", "默认")
+    assert table["value"][0][3] == ui.i18n.load("zh-Hans")["st.error"]
+    assert preview is None and visibility["visible"] is False
+    assert ui.do_sub_select(p, None)[3] is None
+    assert p["cues"][0]["audio_path"] is None and Path(audio).is_file()
+    assert len(warnings) == 1 and "内存不足" in warnings[0]
+    assert any(record.exc_info for record in caplog.records)
+
+
+def test_saving_normalized_unchanged_cue_does_not_regenerate():
+    from app import ui, dubbing_project as dp
+
+    p = dp.build_project("1\n00:00:01,000 --> 00:00:02,000\nAlice: Hello\n", "english", "v0")
+    p["cues"][0].update(status="ok", audio_path="cue_0.wav")
+    ui.do_sub_edit_text(p, 0, " Hello ", " Alice ")
+    assert p["cues"][0]["status"] == "ok"
+    assert _btn_interactive(list(ui._run_sub_gen_all(p, "auto"))[-1][0]) is True
+    assert list(dp.generate_all_iter(p)) == []
+
+
 def test_run_sub_gen_all_reports_all_done(monkeypatch, tmp_path):
     """全部完成后再点「生成全部」不能静默空转，要给出口。"""
     from app import ui, dubbing_project as dp
@@ -661,11 +820,12 @@ def test_run_sub_gen_all_reports_all_done(monkeypatch, tmp_path):
         yield 1, 1
     monkeypatch.setattr(dp, "generate_all_iter", _fake_iter)
     p = dp.build_project("1\n00:00:01,000 --> 00:00:02,000\n你好\n", "chinese", "v0")
-    p["cues"][0]["status"] = "ok"
+    p["cues"][0].update(status="ok", audio_path="cue_0.wav")
     frames = list(ui._run_sub_gen_all(p, "auto"))
     assert infos and "已生成" in infos[0]
     assert generated == []            # 全部完成时不得进入生成循环
     assert len(frames) == 1 and _btn_interactive(frames[0][0]) is True
+    assert frames[0][3]["visible"] is True
 
 
 def test_do_text_count_auto_split_not_tier_warning(monkeypatch):

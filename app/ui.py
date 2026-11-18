@@ -1,24 +1,19 @@
+import codecs
+import logging
+from pathlib import Path
 import re
+import secrets
+
 import gradio as gr
 from app import config, i18n, voice_library, presets, tts_engine
 from app import dubbing_project as _dub, video_mux as _vmux
 
-# ── 视觉设计：青瓷暖声 (celadon · warm voice) ─────────────────────────────
-# PC 桌面工具：宽幅双栏布局；品牌色 = 青瓷玉绿(信任/沉静/本地私密)，
-# 标志 = 「」说话引号(把文字"说出来")。整页暖中性，胆量只花在玉绿一处。
 HEAD = (
-    '<link rel="preconnect" href="https://fonts.googleapis.com">'
-    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
-    '<link href="https://fonts.googleapis.com/css2?'
-    'family=Noto+Sans+SC:wght@400;500;700&'
-    'family=Noto+Serif+SC:wght@400;700;900&'
-    'family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">'
     # Gradio 会把 css= 里的 @media 规则统一挂到 .contain 下，无法改到它的祖先
-    # .main.fillable（手机端的大块内边距把整页挤窄、裁掉 hero 芯片）。HEAD 里的
-    # style 不经过这层作用域，用来只修这一条结构性内边距。
+    # .main.fillable。HEAD 里的 style 不经过这层作用域。
     '<style>@media (max-width:860px){.main.fillable{'
     'padding-left:0!important;padding-right:0!important;}}</style>'
-    # (1) Force light theme (deliberately light celadon design; dark mode breaks it).
+    # (1) Force light theme (the workspace uses a light palette; dark mode breaks it).
     # (2) Manual UI language: persist ?__lang= to localStorage and keep it in the URL
     #     (so the server-side relabel sees it); reflect on <html data-uilang> for the
     #     switcher's active state. The actual relabel happens server-side on demo.load.
@@ -45,9 +40,10 @@ FAVICON = str(config.ROOT / "app" / "assets" / "brand" / "favicon.png")
 
 CSS = """
 :root{
-  --ink:#1E2A23; --jade:#1C9C77; --jade-d:#127155; --mint:#8FE0C2;
-  --paper:#EAF0E7; --surface:#FFFFFF; --sand:#F4EEE1;
-  --line:#D7E2D5; --muted:#54625A; --r:16px;
+  --ink:#1B2C28; --jade:#12664F; --jade-d:#0C4C3A;
+  --paper:#F0F4F1; --surface:#FFFFFF; --sand:#F5F7F5;
+  --line:#D7E1DA; --muted:#4E635A; --selected:#DFEEE6; --r:16px;
+  color-scheme:light;
 }
 
 /* retheme Gradio via its own CSS variables (robust, not selector hacks) */
@@ -59,6 +55,7 @@ CSS = """
   --block-border-color:var(--line);
   --block-border-width:0px;
   --block-shadow:none;
+  --input-shadow:none;
   --block-label-background-fill:transparent;
   --block-label-text-color:var(--ink);
   --block-title-text-color:var(--ink);
@@ -80,18 +77,17 @@ CSS = """
   --button-secondary-border-color:var(--line);
   --button-secondary-text-color:var(--ink);
   --color-accent:var(--jade);
-  --color-accent-soft:rgba(28,156,119,.12);
+  --color-accent-soft:var(--selected);
   --slider-color:var(--jade);
-  --checkbox-label-background-fill-selected:rgba(28,156,119,.14);
+  --checkbox-label-background-fill-selected:var(--selected);
   --checkbox-label-border-color-selected:var(--jade);
   --checkbox-background-color-selected:var(--jade);
   --checkbox-border-color-selected:var(--jade);
 }
 
 .gradio-container{ background:var(--paper)!important; width:100%!important; max-width:1200px!important;
-  margin:0 auto!important; padding:0 20px 48px!important; align-items:stretch!important;
-  font-family:'Noto Sans SC',system-ui,sans-serif; color:var(--ink); font-size:15px;}
-.gradio-container *{ font-family:'Noto Sans SC',system-ui,sans-serif; }
+  margin:0 auto!important; padding:0 24px 28px!important; align-items:stretch!important;
+  font-family:system-ui,'Microsoft YaHei UI',sans-serif; color:var(--ink); font-size:15px;}
 footer{ display:none!important; }
 
 /* Every tab fills the SAME width — Gradio otherwise shrink-wraps main to its
@@ -104,83 +100,48 @@ footer{ display:none!important; }
 .gradio-container .styler{ background:transparent!important;}
 .gradio-container .form{ background:transparent!important; border:none!important; gap:14px!important;}
 
-/* global sage background everywhere (outside the container too) + light controls */
-:root{ color-scheme:light; }
 html, body, gradio-app{ background:var(--paper)!important; }
-/* defensive: if OS dark mode ever slips past the force-light redirect, keep it light */
-.dark{ --body-background-fill:var(--paper); --background-fill-primary:var(--surface);
-  --background-fill-secondary:var(--sand); --block-background-fill:var(--surface);
-  --input-background-fill:#FFFFFF; --border-color-primary:var(--line);
-  --block-border-color:var(--line); --body-text-color:var(--ink);
-  --block-label-text-color:var(--ink); --block-info-text-color:var(--muted);}
-.dark .ev-card, .dark .ev-step, .dark .gradio-container{ background:var(--paper);}
+.gradio-container #ev-masthead, .gradio-container .block:has(> .ev-section-title){
+  background:transparent!important; padding:0!important; box-shadow:none!important;
+}
 
-/* safe: any stray container-block border -> sage (0-width input blocks unaffected) */
-.gradio-container .block{ border-color:var(--line)!important; }
-.gradio-container .block:has(> .ev-hero),
-.gradio-container .block:has(> .ev-steps),
-.gradio-container .block:has(> .ev-eyebrow){ border:none!important; background:transparent!important;
-  padding:0!important; box-shadow:none!important;}
-
-/* ── hero band ─────────────────────────────────────────── */
-.ev-hero{ position:relative; overflow:hidden; border-radius:20px; margin:16px 0 6px;
-  padding:30px 40px 34px; color:#EAF4EE;
-  background:linear-gradient(125deg,#0E5341 0%,#16745A 55%,#1C9270 100%);
-  box-shadow:0 18px 44px -20px rgba(14,83,65,.6); animation:evfade .6s ease both;}
-@keyframes evfade{ from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:none;} }
-.ev-mark{ position:absolute; right:22px; bottom:-92px; font-family:'Noto Serif SC',serif;
-  font-weight:900; font-size:300px; line-height:1; color:#D9F2E6; opacity:.07;
-  pointer-events:none; user-select:none;}
-.ev-hero-row{ position:relative; z-index:1; display:flex; align-items:center;
-  justify-content:space-between; gap:14px; flex-wrap:wrap;}
-.ev-brand{ display:flex; align-items:baseline; gap:12px;}
-.ev-logo{ font-family:'Noto Serif SC',serif; font-weight:900; font-size:32px; letter-spacing:3px; color:#fff;}
-.ev-en{ font-family:'Space Mono',monospace; font-size:12px; letter-spacing:5px; color:#C8EAD8;}
-.ev-status{ display:inline-flex; align-items:center; gap:8px; white-space:nowrap;
-  font-size:13px; color:#F0F8F3; background:rgba(255,255,255,.14); padding:7px 14px; border-radius:999px;}
-.ev-hero-right{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:flex-end;}
-.ev-lang{ display:inline-flex; gap:2px; background:rgba(255,255,255,.18);
-  border:1px solid rgba(255,255,255,.30); border-radius:999px; padding:3px;}
-.ev-lang a{ color:#EAF7F0; font-size:13px; font-weight:600; line-height:1; padding:5px 11px; border-radius:999px;
-  text-decoration:none; cursor:pointer; transition:color .12s, background .12s;}
-.ev-lang a:hover{ color:#fff; background:rgba(255,255,255,.16);}
+.ev-header{
+  display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px 24px;
+  padding:15px 20px; border-radius:var(--r); background:#153C32; color:#E2EEE7;
+}
+.ev-brand{ display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 12px; }
+.ev-brand h1{ margin:0; color:#fff; font-size:22px; font-weight:700; line-height:1.25; }
+.ev-header .ev-trust, .ev-header .ev-status{ color:#E2EEE7!important; font-size:13px; }
+.ev-trust{ margin:0; }
+.ev-header-tools{ display:flex; align-items:center; flex-wrap:wrap; gap:8px 16px; }
+.ev-status{ display:inline-flex; align-items:center; gap:7px; }
+.ev-dot{ flex:none; width:7px; height:7px; border-radius:50%; }
+.ev-dot.live{ background:#95E0B8; }
+.ev-dot.idle{ background:#F0CA81; }
+.ev-lang{ display:flex; gap:2px; padding:2px; background:#284D43; border-radius:8px; }
+.ev-lang a{
+  padding:5px 9px; border-radius:6px; color:#F0F7F2; text-decoration:none; font-size:13px;
+}
+.ev-lang a:hover{ background:#406357; }
+.ev-lang a:focus-visible{ outline-color:#fff!important; }
 html[data-uilang="zh"] .ev-lang .lang-zh,
 html[data-uilang="zh-Hant"] .ev-lang .lang-zhhant,
-html[data-uilang="en"] .ev-lang .lang-en{ background:#fff!important; color:var(--jade-d)!important;
-  font-weight:800; box-shadow:0 1px 3px rgba(0,0,0,.2);}
-.ev-dot{ width:8px; height:8px; border-radius:50%;}
-.ev-dot.live{ background:#8AF0C4;}
-.ev-dot.idle{ background:#FFC56B;}
-@media (prefers-reduced-motion:no-preference){
-  .ev-dot.live{ animation:evpulse 2.6s ease-in-out infinite;}
-  @keyframes evpulse{ 0%,100%{ box-shadow:0 0 0 0 rgba(138,240,196,.55);}
-    50%{ box-shadow:0 0 0 5px rgba(138,240,196,0);} }
+html[data-uilang="en"] .ev-lang .lang-en{
+  background:#fff; color:var(--jade-d)!important; font-weight:700;
 }
-.ev-promise{ position:relative; z-index:1; font-family:'Noto Serif SC',serif; font-weight:700;
-  font-size:46px; line-height:1.2; margin:22px 0 10px; color:#fff; letter-spacing:1px;}
-.ev-qk{ color:var(--mint); font-weight:700;}
-.ev-trust{ position:relative; z-index:1; margin:0; font-size:15px; color:#E7F6EE; letter-spacing:.5px;}
 
-/* ── 3-step strip (honest sequence: pick → write → generate) ─ */
-.ev-steps{ display:flex; gap:12px; margin:18px 0 4px;}
-.ev-step{ flex:1; background:var(--surface); border:1px solid var(--line); border-radius:14px;
-  padding:15px 18px; display:flex; gap:13px; align-items:center;}
-.ev-step .n{ flex:none; width:30px; height:30px; border-radius:50%; background:rgba(28,156,119,.13);
-  color:var(--jade-d); font-weight:700; font-size:15px; font-family:'Space Mono',monospace;
-  display:flex; align-items:center; justify-content:center;}
-.ev-step .t{ font-weight:600; color:var(--ink); font-size:15.5px; line-height:1.3;}
-.ev-step .s{ color:var(--muted); font-size:13px; line-height:1.35; margin-top:2px;}
-
-/* ── segmented tabs (equal, centered, full-width panels) ─── */
-.tab-nav, .tabs>.tab-nav, [role="tablist"]{ justify-content:center!important; border:none!important;
-  gap:5px!important; background:#E1E8DD!important; padding:5px!important; border-radius:999px!important;
-  width:fit-content!important; margin:20px auto 14px!important;}
-.tab-nav button, [role="tab"]{ border:none!important; background:transparent!important;
-  border-radius:999px!important; padding:10px 26px!important; color:var(--muted)!important;
-  font-weight:600!important; font-size:15px!important; transition:color .15s;}
-.tab-nav button.selected, [role="tab"][aria-selected="true"]{ background:#fff!important;
-  color:var(--jade-d)!important; box-shadow:0 2px 8px rgba(18,113,85,.18)!important;}
-.tabitem{ padding:0!important;}
+.ev-tabs [role="tablist"]{ gap:3px; margin-bottom:12px; }
+/* Gradio measures a hidden copy of the tab labels to decide when to show its overflow menu. */
+.ev-tabs .tab-container button, .ev-tabs [role="tab"]{
+  min-height:44px; padding:6px 10px!important; border-radius:8px 8px 0 0;
+  color:var(--muted); font-weight:600; font-size:14px!important;
+}
+.ev-tabs [role="tab"]:hover{ background:var(--sand); }
+.ev-tabs [role="tab"][aria-selected="true"]{
+  background:var(--surface)!important; color:var(--jade-d)!important;
+  box-shadow:inset 0 -2px var(--jade);
+}
+.ev-tabs .tabitem{ padding:0!important; }
 
 /* ── two-column row ────────────────────────────────────── */
 .ev-row{ gap:18px!important; align-items:flex-start!important;}
@@ -190,8 +151,8 @@ html[data-uilang="en"] .ev-lang .lang-en{ background:#fff!important; color:var(-
    element too, and its .gr-group draws its own border/shadow → box-in-box. The :not()
    styles only the outer; the reset below flattens every inner wrapper. */
 .gradio-container .ev-card:not(.ev-card .ev-card){ background:var(--surface)!important;
-  border:1px solid var(--line)!important; border-radius:var(--r)!important; padding:22px 24px!important;
-  box-shadow:0 8px 26px -18px rgba(30,42,35,.42)!important;}
+  border:1px solid var(--line)!important; border-radius:var(--r)!important; padding:16px 18px!important;
+  box-shadow:none!important;}
 .gradio-container .ev-card .ev-card,
 .gradio-container .ev-card .gr-group,
 .gradio-container .ev-guide .ev-guide,
@@ -200,21 +161,24 @@ html[data-uilang="en"] .ev-lang .lang-en{ background:#fff!important; color:var(-
 .gradio-container .ev-acc .ev-acc{ border:0!important; border-radius:0!important;
   box-shadow:none!important; background:transparent!important; padding:0!important;}
 
-/* ── section eyebrow ───────────────────────────────────── */
-.ev-eyebrow{ display:flex; align-items:center; gap:9px; font-weight:700; font-size:15px;
-  color:var(--ink); margin:0 0 14px;}
-.ev-eyebrow::before{ content:""; width:4px; height:17px; border-radius:3px; background:var(--jade);}
+.ev-section-title{
+  margin:0; color:var(--ink); font-size:17px; font-weight:700; line-height:1.4;
+}
+.gradio-container #ev-script [data-testid="block-info"]{ font-size:17px; font-weight:700; }
+.gradio-container #ev-script{ padding:0!important; }
+.gradio-container #ev-script textarea{
+  line-height:1.55; background:var(--sand); border:1px solid var(--line); box-shadow:none;
+}
+.gradio-container #ev-script textarea::placeholder{ color:var(--muted); }
+.gradio-container #ev-script textarea:focus{ border-color:var(--jade); }
+.gradio-container .ev-table-hint{ color:var(--muted); font-size:13px; }
+.gradio-container .ev-table-hint p{ margin:0; }
+.gradio-container .ev-cue-title{ margin-top:12px; font-weight:700; }
 
-/* ── guidance callout ──────────────────────────────────── */
-.gradio-container .ev-guide{ color:var(--muted)!important; font-size:14px!important; line-height:1.7!important;
-  background:var(--sand)!important; border:1px solid #ECE2CC!important; border-left:3px solid var(--jade)!important;
-  border-radius:12px!important; padding:12px 17px!important; margin:4px 0 14px!important;}
-.gradio-container .ev-guide strong{ color:var(--ink)!important;}
-
-/* ── status line (borderless → empty leaves no visible box) ─ */
-.ev-statusline{ color:var(--jade-d)!important; font-size:13.5px!important; font-weight:600!important;
-  text-align:center;}
-.ev-statusline, .ev-statusline *{ margin:0!important;}
+.gradio-container .ev-guide{
+  color:var(--muted); font-size:14px; line-height:1.6;
+  background:var(--sand); border:1px solid var(--line); border-radius:10px; padding:8px 12px;
+}
 
 /* ── advanced accordion intro hint (muted, sets "you can skip this") ─ */
 .gradio-container .ev-acc-hint{ color:var(--muted)!important; font-size:13px!important;
@@ -225,7 +189,7 @@ html[data-uilang="en"] .ev-lang .lang-en{ background:#fff!important; color:var(-
 .gradio-container .ev-vrow{ align-items:center!important; gap:6px!important;
   flex-wrap:nowrap!important; margin-bottom:7px!important;}
 .gradio-container .ev-vrow button{ min-width:44px!important; padding:8px 6px!important;}
-/* editable inline fields (name / 参考文字稿) — Gradio renders Textbox as <textarea> */
+/* editable inline field (音色名) — Gradio renders Textbox as <textarea> */
 .gradio-container .ev-edit textarea, .gradio-container .ev-edit input{ background:#fff!important;
   border:1px solid var(--line)!important; border-radius:9px!important; padding:7px 10px!important;}
 .gradio-container .ev-edit textarea:focus, .gradio-container .ev-edit input:focus{
@@ -249,11 +213,6 @@ html[data-uilang="en"] .ev-lang .lang-en{ background:#fff!important; color:var(-
 .gradio-container .ev-acc .label-wrap .icon{ transform:rotate(0deg)!important;}
 .gradio-container .ev-acc .label-wrap.open .icon{ transform:rotate(180deg)!important;}
 
-/* ── 配音 preset quick bar (apply / save) + manager per-row summary ── */
-.gradio-container .ev-presetbar{ align-items:flex-end!important; gap:6px!important;
-  flex-wrap:nowrap!important; margin-bottom:6px!important;}
-.gradio-container .ev-presetbar button{ min-width:72px!important;}
-.gradio-container .ev-savebar{ margin-top:4px!important;}
 .gradio-container .ev-prow-sum{ margin:-3px 0 12px 2px!important; font-size:12px!important;
   opacity:.85;}
 .gradio-container .ev-prow-sum *{ margin:0!important;}
@@ -264,6 +223,13 @@ html[data-uilang="en"] .ev-lang .lang-en{ background:#fff!important; color:var(-
 
 /* ── inputs ────────────────────────────────────────────── */
 .gradio-container input[type=text], .gradio-container textarea{ font-size:15px!important;}
+.gradio-container .ev-card .wrap-inner:has(input[role="combobox"]),
+.gradio-container .ev-cue-editor textarea{
+  border:1px solid var(--line)!important; border-radius:9px!important;
+  background:var(--sand)!important;
+}
+.gradio-container .ev-card .wrap-inner:focus-within:has(input[role="combobox"]),
+.gradio-container .ev-cue-editor textarea:focus{ border-color:var(--jade)!important; }
 /* kill Soft-theme lavender label pill (Gradio tags the title span block-info) */
 .gradio-container span[data-testid="block-info"]{ background:transparent!important;
   padding-left:0!important; padding-right:0!important;}
@@ -283,29 +249,30 @@ html[data-uilang="en"] .ev-lang .lang-en{ background:#fff!important; color:var(-
 /* ── style radio → 3 equal jade chips on one line (kill indigo selected) ── */
 .gradio-container .ev-style{ width:100%!important;}
 .gradio-container .form:has(> .ev-style){ width:100%!important; display:block!important;}
-.gradio-container .ev-style .wrap{ display:flex!important; flex-wrap:nowrap!important;
-  gap:8px!important; width:100%!important;}
-.gradio-container .ev-style input[type=radio]{ display:none!important;}
+.gradio-container .ev-style .wrap{ display:flex!important; flex-wrap:wrap!important;
+  gap:6px!important; width:100%!important;}
+.gradio-container .ev-style input[type=radio]{
+  position:absolute; opacity:0; width:1px; height:1px; margin:0;
+}
+.gradio-container .ev-style label:has(:focus-visible){
+  outline:2px solid var(--jade); outline-offset:2px;
+}
 .gradio-container .ev-style label{ flex:1 1 0!important; justify-content:center!important; min-width:0!important;
-  white-space:nowrap!important; padding:9px 8px!important;
-  border-radius:10px!important; border:1px solid var(--line)!important; background:#fff!important;}
-.gradio-container label.selected{ background:rgba(28,156,119,.14)!important; border-color:var(--jade)!important;}
+  white-space:normal!important; text-align:center; padding:8px 6px!important;
+  border-radius:10px!important; border:1px solid var(--line)!important; background:#fff!important;
+  box-shadow:none!important;}
+.gradio-container label.selected{ background:var(--selected)!important; border-color:var(--jade)!important;}
 .gradio-container label.selected span{ color:var(--jade-d)!important; font-weight:600!important;}
 
-/* ── primary generate ──────────────────────────────────── */
-#ev-generate{ background:var(--jade)!important; border:none!important; color:#fff!important;
-  font-size:18px!important; font-weight:700!important; letter-spacing:6px!important;
-  padding:15px!important; border-radius:13px!important; margin:12px 0!important;
-  box-shadow:0 14px 30px -10px rgba(28,156,119,.6)!important; transition:filter .15s, transform .12s;}
-#ev-generate:hover{ filter:brightness(1.05); transform:translateY(-1px);}
-#ev-generate:active{ transform:translateY(0);}
+#ev-generate{ min-height:44px; margin:8px 0; font-size:16px; font-weight:700; }
+#ev-subgen{ margin-top:8px; }
+.ev-card button.primary{ border-radius:9px!important; box-shadow:none!important; }
 
 /* ── secondary buttons ─────────────────────────────────── */
 .ev-card button:not(.primary){ border-radius:11px!important; font-weight:600!important;}
 
 /* ── readout summary ───────────────────────────────────── */
-.gradio-container .ev-readout{ font-family:'Space Mono','Noto Sans SC',monospace!important;
-  background:var(--sand)!important; border:1px solid #ECE2CC!important; border-radius:12px!important;
+.gradio-container .ev-readout{ background:var(--sand)!important; border:1px solid var(--line)!important; border-radius:12px!important;
   padding:13px 16px!important; color:var(--ink)!important; font-size:13.5px!important; line-height:1.7;
   white-space:normal!important; word-break:break-word; overflow-wrap:anywhere;}
 
@@ -325,16 +292,16 @@ html[data-uilang="en"] .ev-lang .lang-en{ background:#fff!important; color:var(-
 /* ── 页脚行：GitHub/更多作品 与「退出」同排（退出不再孤悬右下角）；
    分隔线画在本行、横跨整宽，退出与文字同基线 ─ */
 .ev-footrow{ align-items:center!important; justify-content:space-between!important;
-  flex-wrap:wrap!important; margin:30px 0 0!important;
+  flex-wrap:wrap!important; margin:14px 0 0!important;
   border-top:1px solid var(--line); padding-top:16px;}
 
 /* ── 只读字幕表：去掉 Gradio 的可编辑错觉 chrome。
    绿框实为选中格内层 span.text 的 jade inset shadow（computed 取证），手柄是
    .selection-button；剥掉后选中态只由整行淡色高亮表意。 ── */
 .gradio-container .ev-subtable .cell-selected .text{ box-shadow:none!important;}
-.gradio-container .ev-subtable .cell-selected:focus-visible{ outline:none!important;}
 .gradio-container .ev-subtable .cell-selected button{ display:none!important;}
 .gradio-container .ev-subtable .toolbar{ display:none!important;}
+.gradio-container .ev-subtable tbody td{ cursor:pointer; }
 
 /* ── 行内试听播放器：只为听一遍，藏倍速/快退/快进 ── */
 .gradio-container .ev-vaudio button.playback,
@@ -350,17 +317,16 @@ html[data-uilang="en"] .ev-lang .lang-en{ background:#fff!important; color:var(-
 .ev-exit-note{ text-align:right!important; color:var(--muted)!important; font-size:13px!important; margin:6px 2px 0!important;}
 .ev-exit-note *{ margin:0!important;}
 
-/* ── responsive: stack columns on narrow screens ───────── */
 @media (max-width:860px){
-  .ev-row{ flex-direction:column!important;}
-  .ev-steps{ flex-direction:column; gap:8px;}
-  .ev-promise{ font-size:31px;}
-  .ev-mark{ font-size:200px; bottom:-52px;}
-  .ev-hero{ padding:24px 22px;}
-  .gradio-container{ padding:0 14px 40px!important;}
-  /* 5 个图标按钮各占 44px，名字只能被压成一字一行；窄屏把名字单独放一行。 */
-  .ev-vrow:has(.ev-vrow-play){ flex-wrap:wrap!important;}
-  .ev-vrow:has(.ev-vrow-play) .ev-vname{ flex:1 1 100%!important;}
+  .ev-row{ flex-direction:column!important; }
+  .ev-row > .column{ width:100%; min-width:0!important; }
+  .gradio-container{ padding:0 12px 28px!important; }
+  .ev-header{ padding:12px 14px; }
+  .ev-tabs .tab-container button, .ev-tabs [role="tab"]{
+    padding-inline:6px!important; font-size:13px!important;
+  }
+  .ev-vrow:has(.ev-vrow-play){ flex-wrap:wrap!important; }
+  .ev-vrow:has(.ev-vrow-play) .ev-vname{ flex:1 1 100%!important; }
 }
 """
 
@@ -369,43 +335,26 @@ def _header_html(tb):
     gpu = tts_engine.is_gpu()
     dot = "live" if gpu else "idle"
     status = i18n.t(tb, "banner.gpu") if gpu else i18n.t(tb, "banner.cpu")
-    promise = i18n.t(tb, "hero.promise")
     trust = i18n.t(tb, "hero.trust")
     return f"""
-<header class="ev-hero">
-  <span class="ev-mark" aria-hidden="true">声</span>
-  <div class="ev-hero-row">
-    <div class="ev-brand"><span class="ev-logo">易声</span><span class="ev-en">EASYVOICE</span></div>
-    <div class="ev-hero-right">
-      <div class="ev-lang" title="界面语言 / Interface language">
-        <a class="lang-zh" href="?__lang=zh&amp;__theme=light">简</a>
-        <a class="lang-zhhant" href="?__lang=zh-Hant&amp;__theme=light">繁</a>
-        <a class="lang-en" href="?__lang=en&amp;__theme=light">EN</a>
-      </div>
-      <div class="ev-status"><span class="ev-dot {dot}"></span>{status}</div>
-    </div>
+<header class="ev-header">
+  <div class="ev-brand">
+    <h1>易声 EasyVoice</h1>
+    <p class="ev-trust">{trust}</p>
   </div>
-  <h1 class="ev-promise"><span class="ev-qk">「</span>{promise}<span class="ev-qk">」</span></h1>
-  <p class="ev-trust">{trust}</p>
+  <div class="ev-header-tools">
+    <div class="ev-status"><span class="ev-dot {dot}" aria-hidden="true"></span>{status}</div>
+    <nav class="ev-lang" aria-label="界面语言 / Interface language">
+      <a class="lang-zh" lang="zh-Hans" aria-label="简体中文" href="?__lang=zh&amp;__theme=light">简</a>
+      <a class="lang-zhhant" lang="zh-Hant" aria-label="繁體中文" href="?__lang=zh-Hant&amp;__theme=light">繁</a>
+      <a class="lang-en" lang="en" aria-label="English" href="?__lang=en&amp;__theme=light">EN</a>
+    </nav>
+  </div>
 </header>"""
 
 
-def _steps_html(tb):
-    steps = [
-        ("1", i18n.t(tb, "step.pick"),  i18n.t(tb, "step.pick.sub")),
-        ("2", i18n.t(tb, "step.write"), i18n.t(tb, "step.write.sub")),
-        ("3", i18n.t(tb, "step.play"),  i18n.t(tb, "step.play.sub")),
-    ]
-    items = "".join(
-        f'<div class="ev-step"><div class="n">{n}</div>'
-        f'<div class="tx"><div class="t">{t}</div><div class="s">{s}</div></div></div>'
-        for n, t, s in steps
-    )
-    return f'<div class="ev-steps">{items}</div>'
-
-
-def _eyebrow(text):
-    return f'<div class="ev-eyebrow">{text}</div>'
+def _section_title(text):
+    return f'<h2 class="ev-section-title">{text}</h2>'
 
 
 # ── 页脚：GitHub + 作者其他开源应用 ───────────────────────────────────────
@@ -461,14 +410,13 @@ def _build_i18n() -> gr.I18n:
         tb = i18n.load(fname)
         d = dict(tb)                          # 所有文案键（组件 label/info/button/guide）
         d["_hero"]       = _header_html(tb)   # 整块 HTML，按 locale 整体切换
-        d["_steps"]      = _steps_html(tb)
-        d["_eb_setup"]   = _eyebrow(i18n.t(tb, "sec.setup"))
-        d["_eb_compose"] = _eyebrow(i18n.t(tb, "sec.compose"))
-        d["_eb_voadd"]   = _eyebrow(i18n.t(tb, "voice.add_title"))
-        d["_eb_vomng"]   = _eyebrow(i18n.t(tb, "voice.manage_title"))
-        d["_eb_sub1"]    = _eyebrow("① " + i18n.t(tb, "sub.step1"))
-        d["_eb_sub2"]    = _eyebrow("② " + i18n.t(tb, "sub.step2"))
-        d["_eb_sub3"]    = _eyebrow("③ " + i18n.t(tb, "sub.step3"))
+        d["_eb_setup"]   = _section_title(i18n.t(tb, "sec.setup"))
+        d["_eb_voadd"]   = _section_title(i18n.t(tb, "voice.add_title"))
+        d["_eb_vomng"]   = _section_title(i18n.t(tb, "voice.manage_title"))
+        d["_eb_sub1"]    = _section_title("① " + i18n.t(tb, "sub.step1"))
+        d["_eb_sub2"]    = _section_title("② " + i18n.t(tb, "sub.step2"))
+        d["_eb_roles"]   = _section_title(i18n.t(tb, "sub.roles"))
+        d["_eb_sub3"]    = _section_title("③ " + i18n.t(tb, "sub.step3"))
         trans[loc] = d
     return gr.I18n(**trans)
 
@@ -530,7 +478,7 @@ def _mk_progress_cb(progress, tb, key):
 
 
 def _schedule_exit():
-    """0.6s 后强制结束进程——留足时间让"已停止"响应先回到浏览器，再杀掉服务。"""
+    """0.6s 后强制结束进程——留足时间让"已退出"响应先回到浏览器，再杀掉服务。"""
     import os
     import threading
     threading.Timer(0.6, lambda: os._exit(0)).start()
@@ -540,6 +488,14 @@ def do_exit(request: gr.Request = None):
     """界面「退出」按钮：优雅告知后结束进程，普通用户无需去关命令行窗口。"""
     _schedule_exit()
     return gr.update(value=i18n.t(_req_tb(request), "app.exit_done"))
+
+
+def _generation_error_key(error):
+    low = str(error).lower()
+    if ("out of memory" in low or "cublas_status_alloc_failed" in low
+            or re.search(r"\boom\b", low)):
+        return "err.gen_oom"
+    return "err.gen_failed"
 
 
 def do_generate(text, lang, voice_id, temperature=0.9, top_p=0.9, speed=1.0,
@@ -568,12 +524,8 @@ def do_generate(text, lang, voice_id, temperature=0.9, top_p=0.9, speed=1.0,
         import os
         if not os.path.exists(ref):        # 生成途中所选音色被删 → 文件消失，给友好提示而非原始异常
             raise gr.Error(i18n.t(tb, "err.voice_missing")) from e
-        low = str(e).lower()
-        if ("out of memory" in low or "cublas_status_alloc_failed" in low
-                or re.search(r"\boom\b", low)):
-            raise gr.Error(i18n.t(tb, "err.gen_oom")) from e
         # 原始异常仍留在启动窗口日志；界面只给用户可行动的文案，不弹裸 traceback。
-        raise gr.Error(i18n.t(tb, "err.gen_failed")) from e
+        raise gr.Error(i18n.t(tb, _generation_error_key(e))) from e
 
 
 def do_apply_style(style):
@@ -683,7 +635,7 @@ def do_save_preset(name, lang, voice_id, temperature, top_p, speed, pbump=0,
 
 def do_preset_delete(name, pbump, current=None):
     presets.delete_preset(name)
-    # 只清掉被删的那份；删别的方案时不要动配音页当前显示的选择。
+    # 只清掉被删的那份；删别的方案时不要动「文本配音」页当前显示的选择。
     value = None if current == name else current
     return pbump + 1, None, gr.update(choices=presets.list_presets(), value=value)  # 重渲染 / 清待确认 / 刷新下拉
 
@@ -837,15 +789,38 @@ def _gen_btn(project):
     return gr.update(value=i18n.t(tb, "sub.gen_all_n").replace("{n}", str(n)), interactive=True)
 
 
+def _sub_export_visibility(project):
+    return gr.update(visible=any(_dub.cue_audio_path(c) for c in project["cues"]))
+
+
+def _read_subtitle(file_path):
+    """安全读取字幕文件字节流，支持 UTF-16 (LE/BE) 与 UTF-8 (含 BOM)，拦截空字节与解码异常。
+    返回 (content_str, error_key_or_None)。"""
+    try:
+        data = Path(file_path).read_bytes()
+    except OSError:
+        return "", "err.subtitle_read"
+    encoding = "utf-16" if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)) else "utf-8-sig"
+    try:
+        content = data.decode(encoding)
+    except UnicodeError:
+        return "", "err.subtitle_encoding"
+    if "\x00" in content:
+        return "", "err.subtitle_encoding"
+    return content, None
+
+
 def do_sub_parse(file_path, lang, voice_id, detect_speakers=True, request: gr.Request = None):
+    tb = _req_tb(request)
     if not file_path:
-        raise gr.Error(i18n.t(_req_tb(request), "err.need_subtitle"))
-    content = open(file_path, encoding="utf-8", errors="ignore").read()
+        raise gr.Error(i18n.t(tb, "err.need_subtitle"))
+    content, error_key = _read_subtitle(file_path)
+    if error_key:
+        raise gr.Error(i18n.t(tb, error_key))
     project = _dub.build_project(content, lang, voice_id, detect_speakers=detect_speakers)
     if not project["cues"]:
-        raise gr.Error(i18n.t(_req_tb(request), "err.no_cues"))
+        raise gr.Error(i18n.t(tb, "err.no_cues"))
     project["loc"] = _lang_from_request(request)          # 状态列/按钮计数按此语言本地化
-    tb = _req_tb(request)
     mins = max((c["end"] for c in project["cues"]), default=0) / 60.0
     done = (i18n.t(tb, "sub.parsed_done")
             .replace("{n}", str(len(project["cues"]))).replace("{m}", f"{mins:.1f}"))
@@ -853,16 +828,17 @@ def do_sub_parse(file_path, lang, voice_id, detect_speakers=True, request: gr.Re
         done += " · " + i18n.t(tb, "sub.dropped").replace("{d}", str(project["dropped"]))
     return (project, gr.update(value=_sub_table(project)),
             None,                                              # 重置选中行(避免对短字幕用旧 idx 触发 KeyError)
-            gr.update(value="", placeholder=i18n.t(tb, "sub.select_hint")),  # 清空编辑文本
-            gr.update(choices=list(project["speakers"].keys()), value=None),  # 重置角色下拉
+            gr.update(value="", interactive=False),  # 清空编辑文本
+            gr.update(choices=list(project["speakers"].keys()), value=None, interactive=False),  # 重置角色下拉
             None,                                              # 清空试听
             _gen_btn(project),                                 # 生成全部(带待生成计数)
             gr.update(interactive=False),                      # 保存/重录：等点选行才激活
             gr.update(interactive=False),
             gr.update(visible=True),                           # 第②段：角色配音+状态表+编辑面板
             gr.update(visible=True),
-            gr.update(visible=False),                          # 第③段：合成导出区，生成过内容后才出现
+            _sub_export_visibility(project),
             gr.update(visible=True),                           # 右列整卡随第②段一起出现，不留空壳卡
+            None, None, None,                                  # 清空上一个工程的 WAV、SRT 和视频
             gr.update(value=done, visible=True))               # 解析后的摘要（替换上传时的"点解析继续"）
 
 
@@ -875,28 +851,30 @@ def do_sub_select(project, evt: gr.SelectData, request: gr.Request = None):
     c = _dub._cue(project, idx)
     speakers = list(project["speakers"].keys())
     return (idx,
-            gr.update(value=c["text"]),
-            gr.update(choices=speakers, value=c["speaker"]),
-            c.get("audio_path"),
+            gr.update(value=c["text"], interactive=True),
+            gr.update(choices=speakers, value=c["speaker"], interactive=True),
+            _dub.cue_audio_path(c),
             gr.update(interactive=True),
             gr.update(interactive=True))
 
 
 def _role_change(project, speaker, voice_id):
     _dub.set_speaker_voice(project, speaker, voice_id)
-    return project, gr.update(value=_sub_table(project)), _gen_btn(project)
+    return project, gr.update(value=_sub_table(project)), _gen_btn(project), _sub_export_visibility(project)
 
 
 def do_sub_edit_text(project, idx, text, speaker, request: gr.Request = None):
     """保存编辑面板的文本/角色改动（标脏，不立即重生）。"""
     if project is None:
-        return project, gr.update(), gr.update()
+        return project, gr.update(), gr.update(), gr.update(), gr.update()
     if idx is None:
         raise gr.Error(i18n.t(_req_tb(request), "sub.select_hint"))
-    _dub.set_cue_text(project, int(idx), text)
-    if speaker:
-        _dub.set_cue_speaker(project, int(idx), speaker)
-    return project, gr.update(value=_sub_table(project)), _gen_btn(project)
+    idx = int(idx)
+    _dub.set_cue_text(project, idx, text)
+    if (speaker or "").strip():
+        _dub.set_cue_speaker(project, idx, speaker)
+    return (project, gr.update(value=_sub_table(project)), _gen_btn(project),
+            _sub_export_visibility(project), _dub.cue_audio_path(_dub._cue(project, idx)))
 
 
 def _cue_has_unsaved_edit(project, idx, edit_text, edit_speaker):
@@ -926,12 +904,16 @@ def do_sub_reroll(project, idx, model_pref="auto", edit_text=None, edit_speaker=
     if _cue_has_unsaved_edit(project, idx, edit_text, edit_speaker):
         # 「重录」和「保存」挨在同一行，手滑点错的代价是拿到旧词的音频。
         gr.Warning(i18n.t(tb, "sub.unsaved"))
-        return project, gr.update(), gr.update(), gr.update()
+        return project, gr.update(), gr.update(), gr.update(), gr.update()
     project.setdefault("params", {})["model"] = model_pref
-    _dub.reroll_cue(project, int(idx))
-    c = _dub._cue(project, int(idx))
-    return (project, gr.update(value=_sub_table(project)), c.get("audio_path"),
-            _gen_btn(project))
+    idx = int(idx)
+    cue = _dub._cue(project, idx)
+    try:
+        _dub.reroll_cue(project, idx)
+    except Exception as error:
+        gr.Warning(i18n.t(tb, _generation_error_key(error)))
+    return (project, gr.update(value=_sub_table(project)), _dub.cue_audio_path(cue),
+            _gen_btn(project), _sub_export_visibility(project))
 
 
 def _stop_sub_gen(project, request: gr.Request = None):
@@ -945,7 +927,7 @@ def _stop_sub_gen(project, request: gr.Request = None):
 def _run_sub_gen_all(project, model_pref="auto", edit_text=None, edit_speaker=None,
                      sel_idx=None, request: gr.Request = None, progress=gr.Progress()):
     """生成全部（生成器）：禁用→逐条生成并刷新状态→复位；出错也复位。
-    全部生成成功后揭开第③段「合成导出」（渐进式）；可中途停止。"""
+    有有效音频时显示第③段「合成导出」；可中途停止。"""
     tb = _req_tb(request)
     busy = gr.update(value=i18n.t(tb, "btn.generating"), interactive=False)
     stop_hidden = gr.update(visible=False)
@@ -959,7 +941,7 @@ def _run_sub_gen_all(project, model_pref="auto", edit_text=None, edit_speaker=No
         return
     if not any(c["status"] != "ok" for c in project["cues"]):
         gr.Info(i18n.t(tb, "sub.all_done"))
-        yield idle, gr.update(), project, gr.update(), stop_hidden
+        yield idle, gr.update(), project, _sub_export_visibility(project), stop_hidden
         return
     _SUB_CANCEL.discard(project["id"])
     yield (busy, gr.update(), project, gr.update(),
@@ -977,7 +959,7 @@ def _run_sub_gen_all(project, model_pref="auto", edit_text=None, edit_speaker=No
                    project, gr.update(), gr.update())
     except Exception:
         _SUB_CANCEL.discard(project["id"])
-        yield _gen_btn(project), gr.update(), project, gr.update(), stop_hidden
+        yield _gen_btn(project), gr.update(), project, _sub_export_visibility(project), stop_hidden
         raise
     stopped = (project["id"] in _SUB_CANCEL
                and any(c["status"] != "ok" for c in project["cues"]))
@@ -988,9 +970,7 @@ def _run_sub_gen_all(project, model_pref="auto", edit_text=None, edit_speaker=No
     if failed:
         gr.Warning(i18n.t(tb, "sub.gen_failed_n").replace("{n}", str(failed)))
     yield (_gen_btn(project), gr.update(value=_sub_table(project)), project,
-           gr.update(visible=any(c["status"] == "ok" for c in project["cues"])),
-           stop_hidden)
-           # 全失败时不揭开导出区（揭开了也只能拿到 nothing_generated 报错，徒增困惑）
+           _sub_export_visibility(project), stop_hidden)
 
 
 def _run_sub_export(project, video_path, mux_mode, request: gr.Request = None,
@@ -1003,10 +983,10 @@ def _run_sub_export(project, video_path, mux_mode, request: gr.Request = None,
         raise gr.Error(i18n.t(tb, "err.no_project"))
     yield busy, gr.update(), gr.update(), gr.update()
     try:
-        if not any(c.get("status") == "ok" for c in project["cues"]):
+        skipped = sum(not _dub.cue_audio_path(c) for c in project["cues"])
+        if skipped == len(project["cues"]):
             raise gr.Error(i18n.t(tb, "err.nothing_generated"))   # 友好提示，替代 assemble 抛的原始 ValueError
         wav, srt = _dub.assemble(project)
-        skipped = sum(1 for c in project["cues"] if c.get("status") != "ok")
         if skipped:
             gr.Info(i18n.t(tb, "sub.export_skipped").replace("{n}", str(skipped)))
         video_out = None
@@ -1024,12 +1004,11 @@ def _run_sub_export(project, video_path, mux_mode, request: gr.Request = None,
 def do_subtitle_preview(file_path, request: gr.Request = None):
     if not file_path:
         return gr.update(visible=False)
-    try:
-        content = open(file_path, encoding="utf-8", errors="ignore").read()
-    except Exception:
-        return gr.update(visible=False)
-    cues, dropped = tts_engine.parse_subtitles_ex(content)
     tb = _req_tb(request)
+    content, error_key = _read_subtitle(file_path)
+    if error_key:
+        return gr.update(value=i18n.t(tb, error_key), visible=True)
+    cues, dropped = tts_engine.parse_subtitles_ex(content)
     if not cues:
         return gr.update(value=i18n.t(tb, "err.no_cues"), visible=True)
     mins = max(c["end"] for c in cues) / 60.0
@@ -1037,6 +1016,27 @@ def do_subtitle_preview(file_path, request: gr.Request = None):
     if dropped:                                          # 超 6h 上限被丢 → 明示，避免静默缺尾
         msg += " · " + i18n.t(tb, "sub.dropped").replace("{d}", str(dropped))
     return gr.update(value=msg, visible=True)            # 有内容才现身，不留空壳条
+
+
+def _browser_state_secret():
+    """获取或生成持久化的 BrowserState 密钥（存放在 presets/.browser-state-key）。
+    Gradio 6 默认会在服务重启时重新生成临时密钥，导致浏览器端 localStorage 设置解密失败被重置。
+    使用固定落盘密钥保证服务重启或换端口后，用户记住的配音参数依然能正确恢复。"""
+    path = config.PRESETS_DIR / ".browser-state-key"
+    secret = secrets.token_urlsafe(32)
+    try:
+        try:
+            with path.open("x", encoding="ascii") as f:
+                f.write(secret)
+        except FileExistsError:
+            stored = path.read_text(encoding="ascii").strip()
+            if stored:
+                return stored
+            path.write_text(secret, encoding="ascii")
+    except (OSError, UnicodeError):
+        logging.getLogger(__name__).warning("Could not load or save the browser settings key", exc_info=True)
+        return None
+    return secret
 
 
 def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
@@ -1048,35 +1048,45 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
     # 本地隐私工具：Gradio 默认开启遥测与版本检查（都请求 api.gradio.app），
     # 与 README 的「不上传云端」承诺相悖，明确关掉。
     with gr.Blocks(title="易声 EasyVoice", analytics_enabled=False) as demo:   # 标签标题：gr.I18n 不本地化 <title>，用固定品牌名
-        hero = gr.HTML(I18N("_hero"))
+        hero = gr.HTML(I18N("_hero"), elem_id="ev-masthead", padding=False)
         _pbump = gr.State(0)        # 常用方案逐行列表重渲染信号(+1 触发)
         _ppending = gr.State(None)  # 待二次确认删除的方案名
+        _vloc = gr.State(lang)  # 行内文案语言(load 时由 relabel 写入)
         with gr.Tabs(elem_classes=["ev-tabs"]):
-            # ── 配音: settings | compose + result ─────────────────────
+            # ── 配音: compose + result | settings ─────────────────────
             with gr.Tab(I18N("tab.tts")) as tab_tts:
-                steps = gr.HTML(I18N("_steps"))
                 with gr.Row(elem_classes=["ev-row"]):
-                    with gr.Column(scale=2, min_width=320):
+                    with gr.Column(scale=3, min_width=360):
+                        with gr.Group(elem_classes=["ev-card"]):
+                            text_in = gr.Textbox(label=I18N("field.text"),
+                                                 placeholder=I18N("field.text_ph"), lines=8, max_lines=8,
+                                                 elem_id="ev-script")
+                            text_count = gr.Markdown("", visible=False,
+                                                     elem_classes=["ev-tokest"])
+                            gen = gr.Button(I18N("btn.generate"), variant="primary",
+                                            elem_id="ev-generate")
+                            audio_out = gr.Audio(label=I18N("field.result"), elem_classes=["ev-audio"])
+                    with gr.Column(scale=2, min_width=290):
                         with gr.Group(elem_classes=["ev-card"]):
                             eb_setup = gr.HTML(I18N("_eb_setup"))
-                            # 不预选任何方案：空白才诚实地表示"当前参数不来自某个方案"。
-                            dub_preset = gr.Dropdown(_preset_names, value=None,
-                                                     label=I18N("preset.quick"))
-                            lang_dd = gr.Dropdown(_lang_choices(), label=I18N("field.lang"),
-                                                  info=I18N("field.lang_info"), value="auto")
                             voice_dd = gr.Dropdown(_voice_choices(), label=I18N("field.voice"),
                                                    info=I18N("field.voice_info"), value=_first_voice)
+                            lang_dd = gr.Dropdown(_lang_choices(), label=I18N("field.lang"),
+                                                  info=I18N("field.lang_info"), value="auto")
                             style_radio = gr.Radio(
                                 choices=_style_choices(tb), value="natural",
                                 label=I18N("style.title"), info=I18N("style.info"),
                                 elem_classes=["ev-style"],
                             )
-                            speed = gr.Slider(0.5, 2.0, value=1.0, step=0.1, precision=1,
+                            speed = gr.Slider(0.5, 2.0, value=1.0, step=0.05, precision=2,
                                               label=I18N("field.speed"), info=I18N("field.speed_info"))
                             model_radio = gr.Radio(
                                 _model_choices(tb), value=_default_model,
                                 label=I18N("model.title"), elem_classes=["ev-style"],
                                 visible=tts_engine.is_gpu())
+                            # 不预选任何方案：空白才诚实地表示"当前参数不来自某个方案"。
+                            dub_preset = gr.Dropdown(_preset_names, value=None,
+                                                     label=I18N("preset.quick"))
                             with gr.Accordion(I18N("adv.title"), open=False,
                                               elem_classes=["ev-acc"]) as accordion:
                                 adv_hint = gr.Markdown(I18N("adv.hint"),
@@ -1098,24 +1108,14 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                                       elem_classes=["ev-tokest"])
                                 seed_in = gr.Number(value=0, precision=0, minimum=0,
                                                     label=I18N("adv.seed"), info=I18N("adv.seed_info"))
-                            # 保存方案是低频动作：折进次级折叠，缩短左列
+                            # 保存方案是低频动作：折进次级折叠
                             with gr.Accordion(I18N("preset.save_title"), open=False,
                                               elem_classes=["ev-acc"]) as save_acc:
                                 dub_pname = gr.Textbox(label=I18N("preset.name"),
                                                        placeholder=I18N("preset.name_ph"))
                                 dub_save = gr.Button(I18N("preset.save"))
-                    with gr.Column(scale=3, min_width=360):
-                        with gr.Group(elem_classes=["ev-card"]):
-                            eb_compose = gr.HTML(I18N("_eb_compose"))
-                            text_in = gr.Textbox(label=I18N("field.text"),
-                                                 placeholder=I18N("field.text_ph"), lines=10)
-                            text_count = gr.Markdown("", visible=False,
-                                                     elem_classes=["ev-tokest"])
-                            gen = gr.Button(I18N("btn.generate"), variant="primary",
-                                            elem_id="ev-generate")
-                            audio_out = gr.Audio(label=I18N("field.result"), elem_classes=["ev-audio"])
-                style_radio.change(do_apply_style, style_radio, [temperature, top_p],
-                                   show_progress="hidden")
+                style_radio.input(do_apply_style, style_radio, [temperature, top_p],
+                                  show_progress="hidden")
                 # 手动改任一"方案内"参数 → 清空方案选择。否则下拉会一直显示某个
                 # 方案名，而实际参数已经是用户改过的，且再选同一方案也不会触发套用。
                 def _clear_preset_choice():
@@ -1135,6 +1135,122 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 dub_save.click(do_save_preset,
                                [dub_pname, lang_dd, voice_dd, temperature, top_p, speed, _pbump],
                                [dub_preset, _pbump])
+            # ── 字幕配音: 上传→角色配音→生成&挑错→合成导出 ─────────────────
+            with gr.Tab(I18N("tab.subtitle")) as tab_subtitle:
+                sub_guide = gr.Markdown(I18N("sub.guide"), elem_classes=["ev-guide"])
+                _sub_proj = gr.State(None)        # 工程态(按会话)
+                _sub_sel = gr.State(None)         # 当前选中行 idx
+                with gr.Row(elem_classes=["ev-row"]):
+                    with gr.Column(scale=2, min_width=320):
+                        with gr.Group(elem_classes=["ev-card"]):
+                            sub1_eb = gr.HTML(I18N("_eb_sub1"))
+                            sub_file = gr.File(label=I18N("sub.file"), file_count="single",
+                                               type="filepath",
+                                               file_types=[".srt", ".vtt", ".lrc", ".txt"])
+                            sub_lang = gr.Dropdown(_lang_choices(), label=I18N("field.lang"),
+                                                   info=I18N("field.lang_info"), value="auto")
+                            sub_voice = gr.Dropdown(_voice_choices(), label=I18N("field.voice"),
+                                                    info=I18N("field.voice_info"),
+                                                    value=_first_voice)
+                            sub_model_radio = gr.Radio(
+                                _model_choices(tb), value=_default_model,
+                                label=I18N("model.title"), elem_classes=["ev-style"],
+                                visible=tts_engine.is_gpu())
+                            sub_detect_spk = gr.Checkbox(
+                                value=True, label=I18N("sub.detect_speakers"),
+                                info=I18N("sub.detect_speakers_info"))
+                            sub_parse = gr.Button(I18N("sub.parse"), variant="primary")
+                            sub_preview = gr.Markdown("", visible=False, elem_classes=["ev-readout"])
+                            with gr.Group(visible=False, elem_classes=["ev-stage"]) as sub_roles_grp:
+                                roles_eb = gr.HTML(I18N("_eb_roles"))
+                                @gr.render(inputs=[_sub_proj, _vloc])
+                                def _render_roles(project, vloc):
+                                    if not project:
+                                        return
+                                    for spk in project["speakers"].keys():
+                                        # gr.render 生成的控件不会按输入用途自动启用；不写死
+                                        # interactive=True 时角色音色下拉在界面上是禁用的。
+                                        dd = gr.Dropdown(_voice_choices(),
+                                                         value=project["speakers"].get(spk),
+                                                         label=spk, interactive=True)
+                                        dd.input(
+                                            lambda project, voice_id, speaker=spk: _role_change(
+                                                project, speaker, voice_id),
+                                            [_sub_proj, dd], [_sub_proj, sub_table, sub_gen, sub_out_grp],
+                                            show_progress="hidden", concurrency_id=_SUB_CC,
+                                        )
+                    with gr.Column(scale=3, min_width=360):
+                        with gr.Group(elem_classes=["ev-card"], visible=False) as sub_right_card:
+                            with gr.Group(visible=False, elem_classes=["ev-stage"]) as sub_work_grp:
+                                sub2_eb = gr.HTML(I18N("_eb_sub2"))
+                                sub_table_hint = gr.Markdown(I18N("sub.select_hint"),
+                                                             elem_classes=["ev-table-hint"])
+                                sub_table = gr.Dataframe(
+                                    headers=["#", i18n.t(tb, "sub.col_speaker"),
+                                             i18n.t(tb, "sub.col_text"),
+                                             i18n.t(tb, "sub.col_status")],
+                                    datatype=["number", "str", "str", "str"],
+                                    interactive=False, wrap=True, elem_classes=["ev-subtable"])
+                                sub_gen = gr.Button(I18N("sub.gen_all"), variant="primary",
+                                                    elem_id="ev-subgen")
+                                sub_stop = gr.Button(I18N("sub.stop"), variant="secondary",
+                                                     visible=False)
+                                with gr.Group(elem_classes=["ev-card", "ev-cue-editor"]):
+                                    edit_eb = gr.Markdown(I18N("sub.edit_title"),
+                                                          elem_classes=["ev-cue-title"])
+                                    edit_text = gr.Textbox(label=I18N("sub.edit_text"), lines=2,
+                                                           interactive=False)
+                                    edit_speaker = gr.Dropdown([], label=I18N("sub.edit_speaker"),
+                                                               allow_custom_value=True, interactive=False)
+                                    with gr.Row():
+                                        edit_apply = gr.Button(I18N("sub.edit_apply"),
+                                                               interactive=False)
+                                        edit_reroll = gr.Button(I18N("sub.reroll"),
+                                                                interactive=False)
+                                    edit_audio = gr.Audio(label=I18N("sub.preview"),
+                                                          interactive=False, elem_classes=["ev-audio"])
+                            with gr.Group(visible=False, elem_classes=["ev-stage"]) as sub_out_grp:
+                                sub3_eb = gr.HTML(I18N("_eb_sub3"))
+                                sub_video = gr.File(label=I18N("sub.video"), file_count="single",
+                                                    type="filepath")
+                                sub_mux = gr.Radio(choices=[(I18N("sub.mux_replace"), "replace"),
+                                                            (I18N("sub.mux_keep"), "keep")],
+                                                   value="replace", label=I18N("sub.mux_mode"),
+                                                   elem_classes=["ev-style"])
+                                sub_export = gr.Button(I18N("sub.export"), variant="primary")
+                                sub_audio = gr.Audio(label=I18N("field.result"), elem_classes=["ev-audio"])
+                                sub_srt = gr.File(label=I18N("sub.srt"))
+                                sub_video_out = gr.Video(label=I18N("sub.video_out"))
+                sub_file.change(do_subtitle_preview, sub_file, sub_preview, show_progress="hidden")
+                tab_subtitle.select(lambda: gr.update(choices=_voice_choices()), None, sub_voice,
+                                    show_progress="hidden")
+                sub_parse.click(do_sub_parse, [sub_file, sub_lang, sub_voice, sub_detect_spk],
+                                [_sub_proj, sub_table, _sub_sel, edit_text, edit_speaker,
+                                 edit_audio, sub_gen, edit_apply, edit_reroll,
+                                 sub_roles_grp, sub_work_grp, sub_out_grp,
+                                 sub_right_card, sub_audio, sub_srt, sub_video_out, sub_preview],
+                                concurrency_id=_SUB_CC)
+                sub_table.select(do_sub_select, [_sub_proj],
+                                 [_sub_sel, edit_text, edit_speaker, edit_audio,
+                                  edit_apply, edit_reroll])
+                edit_apply.click(do_sub_edit_text,
+                                 [_sub_proj, _sub_sel, edit_text, edit_speaker],
+                                 [_sub_proj, sub_table, sub_gen, sub_out_grp, edit_audio],
+                                 concurrency_id=_SUB_CC)
+                edit_reroll.click(do_sub_reroll,
+                                  [_sub_proj, _sub_sel, sub_model_radio, edit_text, edit_speaker],
+                                  [_sub_proj, sub_table, edit_audio, sub_gen, sub_out_grp],
+                                  concurrency_id=_SUB_CC)
+                sub_gen.click(_run_sub_gen_all,
+                              [_sub_proj, sub_model_radio, edit_text, edit_speaker, _sub_sel],
+                              [sub_gen, sub_table, _sub_proj, sub_out_grp, sub_stop],
+                              concurrency_id=_SUB_CC)
+                sub_stop.click(_stop_sub_gen, [_sub_proj], [sub_stop],
+                               show_progress="hidden", concurrency_id=_SUB_STOP_CC)
+                sub_model_radio.change(do_model_hint, sub_model_radio, None, show_progress="hidden")
+                sub_export.click(_run_sub_export, [_sub_proj, sub_video, sub_mux],
+                                 [sub_export, sub_audio, sub_srt, sub_video_out],
+                                 concurrency_id=_SUB_CC)
             # ── 我的音色库: add | manage ──────────────────────────────
             with gr.Tab(I18N("tab.voices")) as tab_voices:
                 voice_hint = gr.Markdown(I18N("voice.hint"), elem_classes=["ev-guide"])
@@ -1160,7 +1276,6 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                             _pending = gr.State(None)    # 待二次确认删除的音色 id
                             _vediting = gr.State(None)   # 正在编辑的音色 id
                             _vopen = gr.State(None)      # 正在展开试听的音色 id（同一时刻最多一行）
-                            _vloc = gr.State("zh-Hans")  # 行内文案语言(load 时由 relabel 写入)
 
                             @gr.render(inputs=[_bump, _pending, _vediting, _vopen, _vloc],
                                        triggers=[tab_voices.select, _bump.change,
@@ -1264,113 +1379,6 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                                 gr.Markdown(do_preset_summary(name, vloc),
                                             elem_classes=["ev-readout", "ev-prow-sum"])
                                 dl.click(lambda _n=name: _n, None, [_ppending])
-            # ── 字幕配音: 上传→角色配音→生成&挑错→合成导出 ─────────────────
-            with gr.Tab(I18N("tab.subtitle")) as tab_subtitle:
-                sub_guide = gr.Markdown(I18N("sub.guide"), elem_classes=["ev-guide"])
-                _sub_proj = gr.State(None)        # 工程态(按会话)
-                _sub_sel = gr.State(None)         # 当前选中行 idx
-                with gr.Row(elem_classes=["ev-row"]):
-                    with gr.Column(scale=2, min_width=320):
-                        with gr.Group(elem_classes=["ev-card"]):
-                            sub1_eb = gr.HTML(I18N("_eb_sub1"))
-                            sub_file = gr.File(label=I18N("sub.file"), file_count="single",
-                                               type="filepath",
-                                               file_types=[".srt", ".vtt", ".lrc", ".txt"])
-                            sub_lang = gr.Dropdown(_lang_choices(), label=I18N("field.lang"),
-                                                   info=I18N("field.lang_info"), value="auto")
-                            sub_voice = gr.Dropdown(_voice_choices(), label=I18N("field.voice"),
-                                                    info=I18N("field.voice_info"),
-                                                    value=_first_voice)
-                            sub_model_radio = gr.Radio(
-                                _model_choices(tb), value=_default_model,
-                                label=I18N("model.title"), elem_classes=["ev-style"],
-                                visible=tts_engine.is_gpu())
-                            sub_detect_spk = gr.Checkbox(
-                                value=True, label=I18N("sub.detect_speakers"),
-                                info=I18N("sub.detect_speakers_info"))
-                            sub_parse = gr.Button(I18N("sub.parse"), variant="primary")
-                            sub_preview = gr.Markdown("", visible=False, elem_classes=["ev-readout"])
-                            with gr.Group(visible=False, elem_classes=["ev-stage"]) as sub_roles_grp:
-                                roles_eb = gr.HTML(I18N("_eb_sub2"))
-                                @gr.render(inputs=[_sub_proj, _vloc])
-                                def _render_roles(project, vloc):
-                                    if not project:
-                                        return
-                                    for spk in project["speakers"].keys():
-                                        # gr.render 生成的控件不会按输入用途自动启用；不写死
-                                        # interactive=True 时角色音色下拉在界面上是禁用的。
-                                        dd = gr.Dropdown(_voice_choices(),
-                                                         value=project["speakers"].get(spk),
-                                                         label=spk, interactive=True)
-                                        dd.change(_role_change,
-                                                  [dd, _sub_proj], [_sub_proj, sub_table, sub_gen],
-                                                  show_progress="hidden", concurrency_id=_SUB_CC)
-                    with gr.Column(scale=3, min_width=360):
-                        with gr.Group(elem_classes=["ev-card"], visible=False) as sub_right_card:
-                            with gr.Group(visible=False, elem_classes=["ev-stage"]) as sub_work_grp:
-                                sub_table = gr.Dataframe(
-                                    headers=["#", i18n.t(tb, "sub.col_speaker"),
-                                             i18n.t(tb, "sub.col_text"),
-                                             i18n.t(tb, "sub.col_status")],
-                                    datatype=["number", "str", "str", "str"],
-                                    interactive=False, wrap=True, elem_classes=["ev-subtable"])
-                                sub_gen = gr.Button(I18N("sub.gen_all"), variant="primary",
-                                                    elem_id="ev-subgen")
-                                sub_stop = gr.Button(I18N("sub.stop"), variant="secondary",
-                                                     visible=False)
-                                with gr.Group(elem_classes=["ev-card"]):
-                                    edit_eb = gr.Markdown(I18N("sub.edit_title"))
-                                    edit_text = gr.Textbox(label=I18N("sub.edit_text"), lines=2)
-                                    edit_speaker = gr.Dropdown([], label=I18N("sub.edit_speaker"),
-                                                               allow_custom_value=True)
-                                    with gr.Row():
-                                        edit_apply = gr.Button(I18N("sub.edit_apply"),
-                                                               interactive=False)
-                                        edit_reroll = gr.Button(I18N("sub.reroll"),
-                                                                interactive=False)
-                                    edit_audio = gr.Audio(label=I18N("sub.preview"),
-                                                          interactive=False, elem_classes=["ev-audio"])
-                            with gr.Group(visible=False, elem_classes=["ev-stage"]) as sub_out_grp:
-                                sub3_eb = gr.HTML(I18N("_eb_sub3"))
-                                sub_video = gr.File(label=I18N("sub.video"), file_count="single",
-                                                    type="filepath")
-                                sub_mux = gr.Radio(choices=[(I18N("sub.mux_replace"), "replace"),
-                                                            (I18N("sub.mux_keep"), "keep")],
-                                                   value="replace", label=I18N("sub.mux_mode"),
-                                                   elem_classes=["ev-style"])
-                                sub_export = gr.Button(I18N("sub.export"), variant="primary")
-                                sub_audio = gr.Audio(label=I18N("field.result"), elem_classes=["ev-audio"])
-                                sub_srt = gr.File(label=I18N("sub.srt"))
-                                sub_video_out = gr.Video(label=I18N("sub.video_out"))
-                sub_file.change(do_subtitle_preview, sub_file, sub_preview, show_progress="hidden")
-                tab_subtitle.select(lambda: gr.update(choices=_voice_choices()), None, sub_voice,
-                                    show_progress="hidden")
-                sub_parse.click(do_sub_parse, [sub_file, sub_lang, sub_voice, sub_detect_spk],
-                                [_sub_proj, sub_table, _sub_sel, edit_text, edit_speaker,
-                                 edit_audio, sub_gen, edit_apply, edit_reroll,
-                                 sub_roles_grp, sub_work_grp, sub_out_grp,
-                                 sub_right_card, sub_preview],
-                                concurrency_id=_SUB_CC)
-                sub_table.select(do_sub_select, [_sub_proj],
-                                 [_sub_sel, edit_text, edit_speaker, edit_audio,
-                                  edit_apply, edit_reroll])
-                edit_apply.click(do_sub_edit_text,
-                                 [_sub_proj, _sub_sel, edit_text, edit_speaker],
-                                 [_sub_proj, sub_table, sub_gen], concurrency_id=_SUB_CC)
-                edit_reroll.click(do_sub_reroll,
-                                  [_sub_proj, _sub_sel, sub_model_radio, edit_text, edit_speaker],
-                                  [_sub_proj, sub_table, edit_audio, sub_gen],
-                                  concurrency_id=_SUB_CC)
-                sub_gen.click(_run_sub_gen_all,
-                              [_sub_proj, sub_model_radio, edit_text, edit_speaker, _sub_sel],
-                              [sub_gen, sub_table, _sub_proj, sub_out_grp, sub_stop],
-                              concurrency_id=_SUB_CC)
-                sub_stop.click(_stop_sub_gen, [_sub_proj], [sub_stop],
-                               show_progress="hidden", concurrency_id=_SUB_STOP_CC)
-                sub_model_radio.change(do_model_hint, sub_model_radio, None, show_progress="hidden")
-                sub_export.click(_run_sub_export, [_sub_proj, sub_video, sub_mux],
-                                 [sub_export, sub_audio, sub_srt, sub_video_out],
-                                 concurrency_id=_SUB_CC)
         # 页脚行：GitHub/更多作品 与「退出」同排，退出不再孤悬右下角
         with gr.Row(elem_classes=["ev-footrow"]):
             footer = gr.HTML(_footer_html(lang))
@@ -1389,11 +1397,9 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
 
             return {
                 hero: gr.update(value=_header_html(t)),
-                steps: gr.update(value=_steps_html(t)),
-                eb_setup: gr.update(value=_eyebrow(L("sec.setup"))),
-                eb_compose: gr.update(value=_eyebrow(L("sec.compose"))),
-                eb_voadd: gr.update(value=_eyebrow(L("voice.add_title"))),
-                eb_vomng: gr.update(value=_eyebrow(L("voice.manage_title"))),
+                eb_setup: gr.update(value=_section_title(L("sec.setup"))),
+                eb_voadd: gr.update(value=_section_title(L("voice.add_title"))),
+                eb_vomng: gr.update(value=_section_title(L("voice.manage_title"))),
                 tab_tts: gr.update(label=L("tab.tts")),
                 tab_voices: gr.update(label=L("tab.voices")),
                 tab_presets: gr.update(label=L("tab.presets")),
@@ -1437,9 +1443,11 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 sub_detect_spk: gr.update(label=L("sub.detect_speakers"),
                                           info=L("sub.detect_speakers_info")),
                 sub_parse: gr.update(value=L("sub.parse")),
-                sub1_eb: gr.update(value=_eyebrow("① " + L("sub.step1"))),
-                roles_eb: gr.update(value=_eyebrow("② " + L("sub.step2"))),
-                sub3_eb: gr.update(value=_eyebrow("③ " + L("sub.step3"))),
+                sub1_eb: gr.update(value=_section_title("① " + L("sub.step1"))),
+                roles_eb: gr.update(value=_section_title(L("sub.roles"))),
+                sub2_eb: gr.update(value=_section_title("② " + L("sub.step2"))),
+                sub_table_hint: gr.update(value=L("sub.select_hint")),
+                sub3_eb: gr.update(value=_section_title("③ " + L("sub.step3"))),
                 sub_table: gr.update(headers=["#", L("sub.col_speaker"),
                                               L("sub.col_text"), L("sub.col_status")]),
                 sub_gen: gr.update(value=L("sub.gen_all")),
@@ -1468,23 +1476,27 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
             return _relabel_updates(_lang_from_request(request))
 
         # ── 记住配音设置：浏览器 localStorage 持久化(换会话/重启自动恢复上次选择)──
-        # 不持久化 temp/top_p：它们由 style 经 do_apply_style 派生(style_radio.change→温度/top_p)。
-        # 若独立持久化，重载时恢复 style 会触发该链路，用风格固定值覆盖刚恢复的 temp/top_p，
-        # 并经 .change 把固定值写回 localStorage —— 既丢手调值又污染存档。恢复 style 即可正确重算二者。
-        _PKEYS = ["lang", "voice", "style", "speed", "top_k", "rep_pen", "max_tokens", "seed", "model"]
-        _persist = [lang_dd, voice_dd, style_radio, speed, top_k, rep_pen, max_tokens, seed_in, model_radio]
-        _settings = gr.BrowserState({}, storage_key="ev_dub_settings")
+        # 保存语言/音色/风格/语速/top_k/重复惩罚/最大长度/种子/模型以及实际温度和 top_p。
+        # 恢复时若缺少温度/top_p（旧存档），由已存 style 派生默认值；有则直接应用保存的参数。
+        _persist = {"lang": lang_dd, "voice": voice_dd, "style": style_radio, "speed": speed,
+                    "top_k": top_k, "rep_pen": rep_pen, "max_tokens": max_tokens,
+                    "seed": seed_in, "model": model_radio, "temperature": temperature, "top_p": top_p}
+        _persist_components = list(_persist.values())
+        _settings = gr.BrowserState({}, storage_key="ev_dub_settings", secret=_browser_state_secret())
 
         def _save_settings(*vals):
-            return dict(zip(_PKEYS, vals))
-        for _c in _persist:
-            _c.change(_save_settings, _persist, _settings, show_progress="hidden")
+            return dict(zip(_persist, vals))
+        for _c in _persist_components:
+            _c.change(_save_settings, _persist_components, _settings, show_progress="hidden")
 
         def _restore_settings(st):
             st = st or {}
+            if st.get("style") in _STYLE_PARAMS:
+                temp, tp = do_apply_style(st["style"])
+                st = {"temperature": temp, "top_p": tp, **st}
             valid = [vid for _, vid in _voice_choices()]
             ups = []
-            for k, _comp in zip(_PKEYS, _persist):
+            for k in _persist:
                 v = st.get(k)
                 if v is None or (k == "voice" and v not in valid):   # 缺省 / 上次音色已删 → 不动
                     ups.append(gr.update())
@@ -1494,7 +1506,7 @@ def build_ui(lang: str = "zh-Hans") -> gr.Blocks:
                 else:
                     ups.append(gr.update(value=v))
             return ups
-        demo.load(_restore_settings, _settings, _persist, show_progress="hidden")
+        demo.load(_restore_settings, _settings, _persist_components, show_progress="hidden")
 
         demo.load(_relabel, None, _relabel_targets, show_progress="hidden")
         exit_btn.click(do_exit, None, exit_note)   # 界面退出：告知后结束进程

@@ -1,4 +1,5 @@
 # app/dubbing_project.py
+import logging
 import re
 import uuid
 from app import tts_engine
@@ -10,6 +11,7 @@ from app import config, voice_library
 # 时间("12:30")因名字是纯数字被排除，正文不再被吞掉。
 SPEAKER_RE = re.compile(r"^\s*([^\s:：]{1,20})[:：]\s*(.+)$")
 DEFAULT_SPEAKER = "默认"
+_LOG = logging.getLogger(__name__)
 
 
 def split_speaker(text):
@@ -60,19 +62,27 @@ def set_speaker_voice(project, speaker, voice_id):
 def set_cue_text(project, idx, text):
     """改单条文本 → 仅该条标脏。"""
     c = _cue(project, idx)
-    c["text"] = (text or "").strip()
-    c["status"] = "dirty"
+    text = (text or "").strip()
+    if c["text"] != text:
+        c["text"] = text
+        c["status"] = "dirty"
     return project
 
 
 def set_cue_speaker(project, idx, speaker):
     """改单条角色（缺则登记为未指派音色 None）→ 该条标脏。"""
     speaker = (speaker or "").strip() or DEFAULT_SPEAKER
-    project["speakers"].setdefault(speaker, None)
     c = _cue(project, idx)
-    c["speaker"] = speaker
-    c["status"] = "dirty"
+    if c["speaker"] != speaker:
+        project["speakers"].setdefault(speaker, None)
+        c["speaker"] = speaker
+        c["status"] = "dirty"
     return project
+
+
+def cue_audio_path(cue):
+    """试听和导出共用的有效音频路径。"""
+    return cue.get("audio_path") if cue.get("status") == "ok" else None
 
 
 def _cue_dir(project):
@@ -81,9 +91,9 @@ def _cue_dir(project):
     return d
 
 
-def generate_cue(project, idx, seed_override=None):
+def generate_cue(project, idx, seed_override=None, *, raise_on_error=False):
     """按该 cue 角色对应音色合成单条，写缓存 wav，置 audio_path/status。
-    任一步失败(音色缺失/合成/写盘) → status='error'（不抛，不中断整体）。"""
+    失败时清空音频引用并标记 error，单条重录可将异常交给界面提示。"""
     c = _cue(project, idx)
     params = dict(project.get("params") or {})
     if seed_override is not None:
@@ -94,7 +104,10 @@ def generate_cue(project, idx, seed_override=None):
         path = str(_cue_dir(project) / f"cue_{c['idx']}.wav")
         sf.write(path, audio, sr)
     except Exception:
-        c["status"] = "error"
+        c.update(status="error", audio_path=None)
+        _LOG.exception("Subtitle cue %s failed (project %s)", idx, project["id"])
+        if raise_on_error:
+            raise
         return project
     c["audio_path"], c["status"] = path, "ok"
     return project
@@ -123,16 +136,17 @@ def generate_all(project, progress_cb=None):
 
 def reroll_cue(project, idx):
     """单条重录：强制以新随机种子(seed=0)重生，得到不同的一条。"""
-    return generate_cue(project, idx, seed_override=0)
+    return generate_cue(project, idx, seed_override=0, raise_on_error=True)
 
 
 def assemble(project):
     """读取各 cue 缓存音频，按时间轴拼成整段 + 对齐 SRT。返回 (wav, srt)。"""
     items = []
     for c in project["cues"]:
-        if c.get("status") != "ok" or not c.get("audio_path"):   # 跳过 dirty(已改未重生)/error/pending，避免音画不一致
+        path = cue_audio_path(c)
+        if not path:
             continue
-        audio, _sr = sf.read(c["audio_path"], dtype="float32")
+        audio, _sr = sf.read(path, dtype="float32")
         items.append({"start": c["start"], "end": c["end"],
                       "text": c["text"], "audio": audio})
     if not items:

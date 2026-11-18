@@ -9,7 +9,7 @@ from app import ui, seed, tts_engine
 class _QuietClientCancelNoise(logging.Filter):
     """吞掉浏览器取消媒体请求(音频试听拉取够了就主动断开)引发的无害报错噪音：
     h11 'Too little data for declared Content-Length' + WinError 10054 连接重置。
-    这类报错并非服务端故障——文件其实正常外发，只是客户端中途取消，详见 RangedFileResponse。"""
+    这类报错并非服务端故障——文件其实正常外发，只是客户端中途取消，详见 gradio 内置的 RangedFileResponse（gradio/ranged_response.py）。"""
     _N = ("Too little data for declared Content-Length", "WinError 10054",
           "ConnectionResetError", "_call_connection_lost")
 
