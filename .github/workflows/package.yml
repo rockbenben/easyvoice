@@ -1,0 +1,186 @@
+name: Package Windows
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: Bundle to build
+        type: choice
+        required: true
+        default: both
+        options: [both, cpu, gpu]
+      release_tag:
+        description: Existing version tag to publish (empty builds artifacts only)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: easyvoice-package-${{ inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.build.outputs.sha }}
+      tag: ${{ steps.build.outputs.tag }}
+      version: ${{ steps.build.outputs.version }}
+      variants: ${{ steps.build.outputs.variants }}
+    steps:
+      - name: Select revision
+        id: revision
+        env:
+          INPUT_TAG: ${{ inputs.release_tag }}
+        run: |
+          tag="$INPUT_TAG"
+          ref="$GITHUB_SHA"
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            tag="$GITHUB_REF_NAME"
+          elif [[ -n "$tag" ]]; then
+            ref="refs/tags/$tag"
+          fi
+          if [[ -n "$tag" ]] && ! git check-ref-format "refs/tags/$tag"; then
+            echo "Invalid release tag"
+            exit 1
+          fi
+          printf 'tag=%s\nref=%s\n' "$tag" "$ref" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.revision.outputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Validate release and pin build commit
+        id: build
+        env:
+          TAG: ${{ steps.revision.outputs.tag }}
+          VARIANT: ${{ inputs.variant || 'both' }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          version="build-${sha:0:12}"
+          if [[ -n "$TAG" ]]; then
+            [[ "$VARIANT" == "both" ]] || { echo "Releases require both bundles"; exit 1; }
+            [[ "$(git rev-parse "refs/tags/$TAG^{commit}")" == "$sha" ]]
+            python packaging/release.py version "$TAG"
+            version="$TAG"
+          fi
+          variants=$(python -c 'import json, sys; print(json.dumps(["cpu", "gpu"] if sys.argv[1] == "both" else sys.argv[1:]))' "$VARIANT")
+          printf 'sha=%s\ntag=%s\nversion=%s\nvariants=%s\n' "$sha" "$TAG" "$version" "$variants" >> "$GITHUB_OUTPUT"
+
+  package:
+    needs: prepare
+    runs-on: windows-2025
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(needs.prepare.outputs.variants) }}
+    env:
+      PIP_NO_CACHE_DIR: "1"
+      PYTHONNOUSERSITE: "1"
+      PYTHONUTF8: "1"
+      VARIANT: ${{ matrix.variant }}
+      BUNDLE_VERSION: ${{ needs.prepare.outputs.version }}
+      BUILD_SHA: ${{ needs.prepare.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - name: Select build location
+        shell: pwsh
+        run: |
+          $root = $env:GITHUB_WORKSPACE
+          $required = if ($env:VARIANT -eq "gpu") { 28GB } else { 9GB }
+          $drive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($root))
+          if ($drive.AvailableFreeSpace -lt $required) {
+            $alternate = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($env:LOCALAPPDATA))
+            if ($alternate.AvailableFreeSpace -lt $required) {
+              throw "Bundle needs $($required / 1GB) GiB free on the build drive."
+            }
+            $root = Join-Path $env:LOCALAPPDATA "easyvoice-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+            git clone --quiet --no-hardlinks $env:GITHUB_WORKSPACE $root
+            if ($LASTEXITCODE) { throw "Local checkout failed" }
+            git -C $root checkout --quiet --detach $env:BUILD_SHA
+            if ($LASTEXITCODE) { throw "Build revision checkout failed" }
+          }
+          "BUILD_ROOT=$root" >> $env:GITHUB_ENV
+          "CONDA_ROOT=$(Join-Path $root '.conda')" >> $env:GITHUB_ENV
+      - uses: conda-incubator/setup-miniconda@v4
+        with:
+          miniforge-version: latest
+          installation-dir: ${{ env.CONDA_ROOT }}
+          activate-environment: easyvoice-build
+          python-version: "3.12"
+      - name: Install and test bundle dependencies
+        working-directory: ${{ env.BUILD_ROOT }}
+        shell: pwsh
+        run: |
+          $py = Join-Path $env:CONDA_ROOT "envs/easyvoice-build/python.exe"
+          $env:PATH = "$(Join-Path (Split-Path $py) 'Library/bin');$env:PATH"
+          $torchIndex = if ($env:VARIANT -eq "gpu") { "cu128" } else { "cpu" }
+          & $py -m pip install --index-url "https://download.pytorch.org/whl/$torchIndex" "torch==2.8.0" "torchaudio==2.8.0"
+          if ($LASTEXITCODE) { throw "PyTorch installation failed" }
+          & $py -m pip install -r requirements.txt
+          if ($LASTEXITCODE) { throw "Runtime dependency installation failed" }
+          & $py -m pip check
+          if ($LASTEXITCODE) { throw "Runtime dependency check failed" }
+          & $py -m pytest -q
+          if ($LASTEXITCODE) { throw "Tests failed" }
+      - name: Build Windows bundle
+        working-directory: ${{ env.BUILD_ROOT }}
+        shell: pwsh
+        run: |
+          $env:PATH = "$(Join-Path $env:CONDA_ROOT 'envs/easyvoice-build/Library/bin');$env:PATH"
+          & ./build.ps1 -Version $env:BUNDLE_VERSION -Variant $env:VARIANT -CondaRoot $env:CONDA_ROOT -EnvName easyvoice-build -ArchiveOnly
+      - name: Smoke-test ZIP and stage verified assets
+        working-directory: ${{ env.BUILD_ROOT }}
+        shell: pwsh
+        run: |
+          $suffix = if ($env:VARIANT -eq "cpu") { "-cpu" } else { "" }
+          $py = Join-Path $env:CONDA_ROOT "envs/easyvoice-build/python.exe"
+          $env:PATH = "$(Join-Path (Split-Path $py) 'Library/bin');$env:PATH"
+          & $py packaging/release.py package --archive "dist/EasyVoice-$env:BUNDLE_VERSION$suffix.zip" --directory dist/release-assets --version $env:BUNDLE_VERSION --variant $env:VARIANT
+          if ($LASTEXITCODE) { throw "Portable bundle verification failed" }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: easyvoice-${{ matrix.variant }}-win-x64
+          path: ${{ env.BUILD_ROOT }}/dist/release-assets/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  release:
+    needs: [prepare, package]
+    if: needs.prepare.outputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: easyvoice-*-win-x64
+          merge-multiple: true
+          path: release-assets
+      - name: Upload, verify and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+        run: python packaging/release.py publish --directory release-assets --tag "$TAG" --sha "$SHA"

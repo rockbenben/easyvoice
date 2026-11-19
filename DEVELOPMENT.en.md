@@ -84,7 +84,7 @@ easyvoice/
 Before packing, run `python -s -m pip install --no-user -r requirements.txt` in the selected environment. The build checks imports in the source and the extracted runtime with `-E -s` (external Python environment variables and the user site are ignored).
 
 ```powershell
-pwsh -File build.ps1 -Version v1.1.2                  # Full bundle: GPU/CPU auto, model bundled (~4.6 GB)
+pwsh -File build.ps1 -Version v1.1.2                  # Full bundle: GPU/CPU auto, model bundled (~5 GiB)
 pwsh -File build.ps1 -Version v1.1.2 -Variant cpu     # CPU lite: no CUDA, no model (~0.5 GB; model downloaded in-app on first launch)
 ```
 
@@ -92,4 +92,12 @@ pwsh -File build.ps1 -Version v1.1.2 -Variant cpu     # CPU lite: no CUDA, no mo
 >
 > The remaining parameters (`-EnvName` / `-CondaRoot` / `-ModelId` / `-Variant`) are documented in the header comment of `build.ps1` and rarely need changing.
 
-It produces `dist/EasyVoice-<Version>[-cpu]/` and a same-named `.zip`. The full bundle exceeds GitHub's 2 GB per-asset limit — split it into volumes (with `merge-and-extract.bat`) or host externally; the CPU lite bundle is a single file. The split volumes and `merge-and-extract.bat` ship as release assets, not in this repository.
+The local build produces `dist/EasyVoice-<Version>[-cpu]/` and a same-named `.zip`.
+
+## Publishing with GitHub Actions
+
+Move the release notes under the same `## vX.Y.Z` heading in both changelogs, then push the matching tag for that commit. **Package Windows** builds the CPU lite and CUDA full bundles and publishes a GitHub Release using both changelog sections as release notes. CI uses the built-in `GITHUB_TOKEN`.
+
+CI uses Python 3.12 and the matching CPU or CUDA 12.8 PyTorch wheels on Windows. It extracts each ZIP to a fresh directory, relocates the runtime, and generates and decodes a WAV. The CPU bundle verifies the first-run 0.6B model download and cache reuse in a fresh process. The full bundle exercises the bundled model and CPU fallback on a runner without a GPU. If the full ZIP exceeds the asset size limit, CI produces `.zip.01`, `.zip.02`, and further volumes as needed, with `merge-and-extract.bat`. CI publishes the draft only after it verifies all uploaded assets and SHA-256 digests.
+
+In Actions → **Package Windows** → **Run workflow**, leave `release_tag` blank to build `cpu`, `gpu`, or `both` as test artifacts retained for seven days. To retry publishing an existing tag, set `release_tag` and choose `both`. If only the release job failed, rerun the failed job in the original run to reuse the verified artifacts.

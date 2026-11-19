@@ -84,7 +84,7 @@ easyvoice/
 打包前，在对应环境中用 `python -s -m pip install --no-user -r requirements.txt` 补齐依赖。构建会用 `-E -s` 检查源环境和解包后的运行时（忽略外部 Python 环境变量与用户级包目录）。
 
 ```powershell
-pwsh -File build.ps1 -Version v1.1.2                  # 完整大包：GPU/CPU 自适应、内置模型（约 4.6GB）
+pwsh -File build.ps1 -Version v1.1.2                  # 完整大包：GPU/CPU 自适应、内置模型（约 5 GiB）
 pwsh -File build.ps1 -Version v1.1.2 -Variant cpu     # CPU 精简包：无 CUDA、不含模型（约 0.5GB；模型首启在工具内下载）
 ```
 
@@ -92,4 +92,12 @@ pwsh -File build.ps1 -Version v1.1.2 -Variant cpu     # CPU 精简包：无 CUDA
 >
 > 其余参数（`-EnvName` / `-CondaRoot` / `-ModelId` / `-Variant`）见 `build.ps1` 头部注释，通常不用改。
 
-产物为 `dist/EasyVoice-<Version>[-cpu]/` 目录与同名 `.zip`。完整大包超过 GitHub Release 单文件 2 GB 上限，需分卷（配 `merge-and-extract.bat`）或走外部托管；CPU 精简包单文件即可上传。分卷与 `merge-and-extract.bat` 作为 Release 资产发布，不在源码库内。
+本地打包产物为 `dist/EasyVoice-<Version>[-cpu]/` 目录与同名 `.zip`。
+
+## GitHub Actions 发版
+
+在两份 CHANGELOG 中用同一个 `## vX.Y.Z` 标题归档本次更新，再推送指向该提交的同名标签。**Package Windows** 会构建 CPU 精简包和 CUDA 完整版并发布 GitHub Release，正文取自两份 CHANGELOG 的对应版本。CI 使用自带的 `GITHUB_TOKEN`。
+
+CI 在 Windows 上用 Python 3.12 和对应的 PyTorch CPU / CUDA 12.8 构建运行时。打包后，CI 把 ZIP 解压到新目录，重定位运行时并实际生成、解码一段 WAV。CPU 包验证首次下载 0.6B 模型及新进程复用缓存，完整版验证包内模型和无 GPU 时的 CPU 回退。超出单文件限制的完整版自动拆成 `.zip.01`、`.zip.02` 等分卷，并生成 `merge-and-extract.bat`。两种包的资产和 SHA-256 均通过核对后，CI 才会公开 Release 草稿。
+
+在 Actions → **Package Windows** → **Run workflow** 中留空 `release_tag`，可选 `cpu`、`gpu` 或 `both` 构建测试包，产物保留 7 天。填写已有的 `release_tag` 并选择 `both` 可重试发布。仅 Release 作业失败时，可在原运行中重跑失败作业，复用已验证的产物。

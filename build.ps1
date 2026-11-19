@@ -30,12 +30,13 @@
      pwsh -File build.ps1 -Version v1.1.2 -EnvName easyvoice -CondaRoot D:\miniconda3
      pwsh -File build.ps1 -Version v1.1.2 -Variant cpu   # easyvoice-cpu env, no CUDA, no bundled model
      -ModelId selects the model id packed into the full bundle (default Qwen/Qwen3-TTS-12Hz-0.6B-Base).
+     -ArchiveOnly keeps only the ZIP; CI uses it before verifying a fresh extraction.
 
  Notes:
    - Run `python app_main.py` successfully once first (confirms the env works).
    - Close any running app (port 7860) before packing, to avoid file locks.
    - The full bundle directory is roughly 6-8GB (runtime ~5GB + 0.6B weights
-     ~2.3GB); the zip is about 4.6GB. Reserve about 12-13GB in dist\ for both.
+     ~2.3GB); the zip is about 5 GiB. Reserve about 14 GiB in dist\ for both.
 
  This script is intentionally ASCII-only: it is read and run by Windows
  PowerShell 5.1 and by consoles on non-UTF-8 code pages, where non-ASCII
@@ -48,7 +49,8 @@ param(
   [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._+-]*$')][string]$Version = "v1.1.2",
   [string]$CondaRoot = "$env:USERPROFILE\miniconda3",
   [string]$ModelId   = "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
-  [ValidateSet("gpu","cpu")][string]$Variant = "gpu"
+  [ValidateSet("gpu","cpu")][string]$Variant = "gpu",
+  [switch]$ArchiveOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -224,7 +226,9 @@ Ok "cleaned and created $Stage"
 Step 3 "Pack the conda env (about 5GB, takes a few minutes)"
 $packZip = Assert-DistPath (Join-Path $Dist "runtime.zip")
 if (Test-Path -LiteralPath $packZip) { Remove-Item -LiteralPath $packZip -Force }
-& $Conda run -n base conda-pack -p $EnvPath -o "$packZip" --format zip --n-threads -1 --ignore-missing-files --force
+# Torch ships static linker libraries for building C++ extensions. EasyVoice
+# only uses the installed Python modules and DLLs, so keep those and skip .lib.
+& $Conda run -n base conda-pack -p $EnvPath -o "$packZip" --format zip --n-threads -1 --ignore-missing-files --exclude "Lib/site-packages/torch/lib/*.lib" --force
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $packZip)) { throw "conda-pack failed" }
 
 Write-Host "  Extracting runtime ..."
@@ -336,10 +340,11 @@ if ($SevenZip) {
 }
 $zipGB = "{0:N2}" -f ((Get-Item $zipPath).Length / 1GB)
 Ok "wrote $zipPath ($zipGB GB)"
+if ($ArchiveOnly) { Remove-DistTree $Stage }
 
 # ---- Done --------------------------------------------------------------------
 Write-Host "`nAll done." -ForegroundColor Green
-Write-Host "  Bundle directory: $Stage"
+if (-not $ArchiveOnly) { Write-Host "  Bundle directory: $Stage" }
 Write-Host "  Archive:          $zipPath  ($zipGB GB)"
 Write-Host "`nAcceptance: copy the zip to a clean Windows machine (ideally without an NVIDIA GPU), extract it"
 Write-Host "            and double-click 'Start EasyVoice.bat'. First run: ~1 min init + ~30 s model load, then a browser opens."

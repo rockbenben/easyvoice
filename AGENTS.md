@@ -9,7 +9,7 @@
 ## Health Stack
 
 - **测试**：`python -m pytest -q`（CI 跑同一套测试，命令是 `pytest -q`，Python 3.12）
-  CI 只装 `gradio numpy soundfile opencc-python-reimplemented pytest`——torch 与 qwen-tts 是运行时惰性导入，单测不需要，也别把它们装进来（GB 级依赖 + 会想去下权重）。
+  常规测试 CI 只装 `gradio numpy soundfile opencc-python-reimplemented pytest`——torch 与 qwen-tts 是运行时惰性导入，单测不需要，也别把它们装进来（GB 级依赖 + 会想去下权重）。
 - **跑起来**：`python app_main.py`（首启会确保 0.6B 模型在位，缺则从 ModelScope 下载）
 - **界面自证**：改 `app/ui.py` 就得起一个服务在浏览器里点一遍再报告。单测抓不到「控件渲染出来是灰的」「CSS 根本没生效」这类问题——这两桩都真实发生过（见下面两条陷阱）。
 
@@ -56,3 +56,4 @@
 - 用户可见改动同步记进 [CHANGELOG.md](CHANGELOG.md) / [CHANGELOG.en.md](CHANGELOG.en.md) 的「未发布」段（中英两份同改）；发版时再归入对应版本。
 - 按功能域合并提交，一条提交说清一件事；message 写实质改动，不写过程词、不加署名。
 - **不自动 push、不打 tag、不发 Release**——这些等人明确点头。
+- 已授权 CI 在版本标签推送后自动发布。版本准备、验证和重试入口见 [GitHub Actions 发版](DEVELOPMENT.md#github-actions-发版)。

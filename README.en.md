@@ -38,10 +38,10 @@ Grab a bundle from **[Releases](../../releases/latest)** (or the **[China Mirror
 
 | Bundle | Size | Recommended hardware | Model |
 |---|---|---|---|
-| **Full bundle** (GPU / CPU auto) | ~4.6 GB (3 volumes) | NVIDIA GPU / fast generation | Bundled 0.6B model |
+| **Full bundle** (GPU / CPU auto) | ~5 GiB (see Release for volumes) | NVIDIA GPU / fast generation | Bundled 0.6B model |
 | **CPU lite bundle** | ~0.5 GB (single file) | No GPU / lightweight download | Auto-downloads model on first launch (~2.3 GB) |
 
-- **Full bundle**: Put all three parts (`.zip.01`, `.zip.02`, `.zip.03`) and `merge-and-extract.bat` in the same directory, then double-click the bat to merge and extract.
+- **Full bundle**: Download every part (`.zip.01`, `.zip.02`, and so on) and place them next to `merge-and-extract.bat`. Double-click the bat to merge and extract. If you downloaded a complete ZIP, extract it directly.
 - **CPU lite bundle**: Download the `-cpu` zip and extract.
 
 ### 2. Launch
