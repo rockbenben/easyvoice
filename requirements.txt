@@ -4,8 +4,8 @@ qwen-tts
 # Audio I/O
 soundfile
 
-# UI
-gradio>=6,<7
+# UI: Gradio 6.18+ needs huggingface-hub 1.x, while qwen-tts pins Transformers 4.57.3 (<1.0 Hub).
+gradio==6.17.3
 
 # Chinese text processing
 opencc-python-reimplemented

@@ -251,6 +251,34 @@ def test_partial_model_cache_is_not_treated_as_downloaded(monkeypatch, tmp_path)
     assert not te.has_17b_downloaded()
 
 
+def test_model_resolver_reuses_modelscope_snapshot_without_a_legacy_link(monkeypatch, tmp_path):
+    import sys
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    model_id = te.config.MODEL_06B
+    cache = tmp_path / "cache"
+    sdk_root = cache / "models"
+    snapshot = sdk_root / "models" / model_id.replace("/", "--") / "snapshots" / "master"
+    _make_model_dir(snapshot)
+    monkeypatch.setenv("MODELSCOPE_CACHE", str(cache))
+    monkeypatch.setattr(te.config, "MODELS_DIR", tmp_path / "bundle")
+    monkeypatch.setattr(te, "_DOWNLOADED_DIRS", {})
+    resolve = Mock(return_value=snapshot)
+    download = Mock(side_effect=AssertionError("Downloaded again after restart"))
+    monkeypatch.setitem(sys.modules, "modelscope", SimpleNamespace(snapshot_download=download))
+    monkeypatch.setitem(sys.modules, "modelscope.hub.cache_manager",
+                        SimpleNamespace(resolve_cached_snapshot=resolve))
+    monkeypatch.setitem(sys.modules, "modelscope_hub.errors", SimpleNamespace(CacheError=ValueError))
+
+    assert te.ensure_model(model_id) == str(snapshot)
+    resolve.assert_called_once_with(model_id, cache_dir=sdk_root)
+    download.assert_not_called()
+
+    (snapshot / "speech_tokenizer/model.safetensors").unlink()
+    assert te.resolve_model_dir(model_id) == model_id
+
+
 def test_ensure_model_raises_clear_error_on_failure(monkeypatch, tmp_path):
     import sys, types, pytest
     from app import tts_engine, config

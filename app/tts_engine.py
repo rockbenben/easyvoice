@@ -46,6 +46,23 @@ def resolve_model_dir(model_id: str) -> str:
             local = root / owner / leaf
             if _has_model_files(local):
                 return str(local)
+
+    # ModelScope may leave only a snapshot, since the legacy link is best-effort on Windows.
+    for root in (cache / "models", cache):
+        snapshots = root / "models" / model_id.replace("/", "--") / "snapshots"
+        if not snapshots.is_dir():
+            continue
+        try:
+            from modelscope.hub.cache_manager import resolve_cached_snapshot
+            from modelscope_hub.errors import CacheError
+        except ImportError:
+            break
+        try:
+            local = resolve_cached_snapshot(model_id, cache_dir=root)
+        except (CacheError, OSError):
+            continue
+        if _has_model_files(local):
+            return str(local)
     return model_id
 
 
