@@ -6,18 +6,19 @@ Full notes for each release are on [Releases](../../releases).
 
 ## Unreleased
 
-### Improvements
+## v1.2.0
 
-- Redesigned interface: the Dub tab is now "Text dubbing", and the tab order is Text dubbing → Subtitle Dub → My Voices → Presets; the big banner and three-step strip are replaced by a single header line, text input, Generate and the result sit in the left column with settings on the right, and the two columns stack on narrow windows; hint copy throughout is shorter and plainer.
-- More truly offline: the interface no longer loads fonts from Google Fonts, and Gradio's telemetry and online version check are switched off — the page works as usual without internet and no longer sends usage data out.
-- Friendlier subtitle import: UTF-16 and UTF-8-with-BOM subtitle files now parse directly; when the encoding cannot be read, you are told to re-save the file as UTF-8 (or BOM-prefixed UTF-16) instead of only seeing "no subtitles parsed"; LRC lines with several timestamps or millisecond-precision times now line up correctly.
-- Easier Subtitle Dub page: character voices get their own "Character voices" section, and the table hints that you should select a row to edit; until a row is selected the editor fields stay grey and inactive, so you cannot edit the wrong line; parsing a new subtitle file clears the previous preview audio, exported subtitles and dubbed video so old results cannot be mistaken for new ones.
-- Settings are remembered better: after the service restarts, your language, voice, style, speed, model, and any hand-adjusted temperature/top_p are restored instead of being reset.
+This update is for anyone who dubs text, edits subtitles one line at a time, or works offline. Download instructions for both Windows bundles are below.
 
-### Fixes
+### Changed
 
-- Saving and re-recording in Subtitle Dub is more reliable: saving without actually changing the text or character no longer marks the line as pending (no wasted regeneration), and a failed single re-record shows a clear out-of-memory or generation error and no longer shows the previous clip as the new one.
-- Fixed random seeds are now reliable: with a positive seed, the same text and settings produce the same audio, even across automatic long-text splitting or while other generation jobs are running.
-- Exporting with "Keep original (ducked)" is more robust: videos without an audio track automatically fall back to dub-only, multi-track videos use the first track, and a short original track no longer truncates the final video.
+- Text dubbing puts the text box, Generate button, and preview on the left, with settings on the right. The columns stack in narrow windows. EasyVoice restores your last language, voice, style, speed, model, and manually adjusted sampling settings after a restart.
+- The CPU lite bundle downloads the 0.6B model on first launch. The full bundle includes the model and supports NVIDIA acceleration with CPU fallback. To unpack the full bundle, put every volume next to the merge script and run it. Both bundles include SHA-256 checksum files.
 
-Changes that are in the source but not yet in a bundle build get listed here — [run from source](DEVELOPMENT.en.md) to get them early.
+### Fixed
+
+- Subtitle import handles UTF-16, UTF-8 with a BOM, and LRC with multiple or millisecond timestamps. Select a row before editing. Reimporting clears previews and exports from the previous project, and saving an untouched line avoids regenerating it. If a re-recording fails, EasyVoice shows the reason and clears the stale audio preview.
+- The interface loads offline with version checks and telemetry disabled. After a restart, EasyVoice uses the local ModelScope model cache. Source installs select interface dependencies compatible with Qwen3-TTS.
+- With a fixed seed, splitting long text and running other jobs no longer disturb the result. Keeping the original audio uses the first track and preserves the full picture if that track ends early. Videos with no original track export with the dub alone.
+
+[See Windows download and startup instructions](https://github.com/rockbenben/easyvoice/blob/v1.2.0/README.en.md#quick-start)
